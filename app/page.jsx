@@ -1232,7 +1232,7 @@ function CloudConfigModal({ onConfirm, onCancel, type = 'empty' }) {
         </div>
         <p className="muted" style={{ marginBottom: 20, fontSize: '14px', lineHeight: '1.6' }}>
           {isConflict
-            ? '检测到本地配置比云端更新，请选择操作：'
+            ? '检测到本地配置与云端不一致，请选择操作：'
             : '是否将本地配置同步到云端？'}
         </p>
         <div className="row" style={{ flexDirection: 'column', gap: 12 }}>
@@ -1857,11 +1857,6 @@ export default function HomePage() {
   const [hasUpdate, setHasUpdate] = useState(false);
   const [latestVersion, setLatestVersion] = useState('');
   const [updateContent, setUpdateContent] = useState('');
-
-  // FIXME 强制登出
-  useLayoutEffect(() => {
-    handleLogout();
-  }, []);
 
   useEffect(() => {
     const checkUpdate = async () => {
@@ -3317,12 +3312,18 @@ export default function HomePage() {
         return;
       }
       if (data?.data && typeof data.data === 'object' && Object.keys(data.data).length > 0) {
-        const cloudTime = new Date(data.updated_at || 0).getTime();
-        const localTime = new Date(localStorage.getItem('localUpdatedAt') || 0).getTime();
-        
-        if (localTime > cloudTime + 2000) {
-          setCloudConfigModal({ open: true, userId, type: 'conflict', cloudData: data.data });
-          return;
+        const localPayload = collectLocalPayload();
+        const localComparable = getComparablePayload(localPayload);
+        const cloudComparable = getComparablePayload(data.data);
+
+        if (localComparable !== cloudComparable) {
+          const cloudTime = new Date(data.updated_at || 0).getTime();
+          const localTime = new Date(localStorage.getItem('localUpdatedAt') || 0).getTime();
+          
+          if (localTime > cloudTime + 2000) {
+            setCloudConfigModal({ open: true, userId, type: 'conflict', cloudData: data.data });
+            return;
+          }
         }
 
         await applyCloudConfig(data.data, data.updated_at);
@@ -3606,16 +3607,17 @@ export default function HomePage() {
           >
             <RefreshIcon className={refreshing ? 'spin' : ''} width="18" height="18" />
           </button>
-          <button
-            className="icon-button"
-            aria-label="打开设置"
-            onClick={() => setSettingsOpen(true)}
-            title="设置"
-          >
-            <SettingsIcon width="18" height="18" />
-          </button>
+          {/*<button*/}
+          {/*  className="icon-button"*/}
+          {/*  aria-label="打开设置"*/}
+          {/*  onClick={() => setSettingsOpen(true)}*/}
+          {/*  title="设置"*/}
+          {/*  hidden*/}
+          {/*>*/}
+          {/*  <SettingsIcon width="18" height="18" />*/}
+          {/*</button>*/}
           {/* 用户菜单 */}
-          <div className="user-menu-container" ref={userMenuRef} hidden>
+          <div className="user-menu-container" ref={userMenuRef}>
             <button
               className={`icon-button user-menu-trigger ${user ? 'logged-in' : ''}`}
               aria-label={user ? '用户菜单' : '登录'}
@@ -4914,6 +4916,18 @@ export default function HomePage() {
 
             <form onSubmit={handleSendOtp}>
               <div className="form-group" style={{ marginBottom: 16 }}>
+                <div style={{
+                  marginBottom: 12,
+                  padding: '8px 12px',
+                  background: 'rgba(230, 162, 60, 0.1)',
+                  border: '1px solid rgba(230, 162, 60, 0.2)',
+                  borderRadius: '4px',
+                  fontSize: '0.8rem',
+                  color: '#e6a23c',
+                  lineHeight: '1.4'
+                }}>
+                  ⚠️ 登录功能目前正在测试，使用过程中如遇到问题欢迎大家在 <a href="https://github.com/hzm0321/real-time-fund/issues" target="_blank" style={{ textDecoration: 'underline', color: 'inherit' }}>Github</a> 上反馈
+                </div>
                 <div className="muted" style={{ marginBottom: 8, fontSize: '0.8rem' }}>
                   请输入邮箱，我们将发送验证码到您的邮箱
                 </div>
