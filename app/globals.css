@@ -420,6 +420,16 @@ input[type="number"] {
   transform: translateY(0);
 }
 
+.sticky-toggle-btn {
+  display: none !important;
+}
+
+@media (max-width: 640px) {
+  .sticky-toggle-btn {
+    display: inline-flex !important;
+  }
+}
+
 .icon-button.danger {
   background: linear-gradient(180deg, #ef4444, #f87171);
   color: #2b0b0b;

@@ -9,7 +9,7 @@ import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import Announcement from "./components/Announcement";
 import { DatePicker, DonateTabs, NumericInput, Stat } from "./components/Common";
-import { ChevronIcon, CloseIcon, CloudIcon, DragIcon, ExitIcon, EyeIcon, EyeOffIcon, GridIcon, ListIcon, LoginIcon, LogoutIcon, MailIcon, PlusIcon, RefreshIcon, SettingsIcon, SortIcon, StarIcon, TrashIcon, UpdateIcon, UserIcon } from "./components/Icons";
+import { ChevronIcon, CloseIcon, CloudIcon, DragIcon, ExitIcon, EyeIcon, EyeOffIcon, GridIcon, ListIcon, LoginIcon, LogoutIcon, MailIcon, PinIcon, PinOffIcon, PlusIcon, RefreshIcon, SettingsIcon, SortIcon, StarIcon, TrashIcon, UpdateIcon, UserIcon } from "./components/Icons";
 import githubImg from "./assets/github.svg";
 import weChatGroupImg from "./assets/weChatGroup.png";
 import { supabase, isSupabaseConfigured } from './lib/supabase';
@@ -1729,6 +1729,7 @@ function CountUp({ value, prefix = '', suffix = '', decimals = 2, className = ''
 function GroupSummary({ funds, holdings, groupName, getProfit }) {
   const [showPercent, setShowPercent] = useState(true);
   const [isMasked, setIsMasked] = useState(false);
+  const [isSticky, setIsSticky] = useState(false);
   const rowRef = useRef(null);
   const [assetSize, setAssetSize] = useState(24);
   const [metricSize, setMetricSize] = useState(18);
@@ -1790,7 +1791,25 @@ function GroupSummary({ funds, holdings, groupName, getProfit }) {
   if (!summary.hasHolding) return null;
 
   return (
-    <div className="glass card group-summary-card" style={{ marginBottom: 8, padding: '16px 20px', background: 'rgba(255, 255, 255, 0.03)' }}>
+    <div className={isSticky ? "group-summary-sticky" : ""}>
+    <div className="glass card group-summary-card" style={{ marginBottom: 8, padding: '16px 20px', background: 'rgba(255, 255, 255, 0.03)', position: 'relative' }}>
+      <span
+        className="sticky-toggle-btn"
+        onClick={() => setIsSticky(!isSticky)}
+        style={{
+          position: 'absolute',
+          top: 4,
+          right: 4,
+          width: 24,
+          height: 24,
+          padding: 4,
+          opacity: 0.6,
+          zIndex: 10,
+          color: 'var(--muted)'
+        }}
+      >
+        {isSticky ? <PinIcon width="14" height="14" /> : <PinOffIcon width="14" height="14" />}
+      </span>
       <div ref={rowRef} className="row" style={{ alignItems: 'flex-end', justifyContent: 'space-between' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
@@ -1854,6 +1873,7 @@ function GroupSummary({ funds, holdings, groupName, getProfit }) {
           </div>
         </div>
       </div>
+    </div>
     </div>
   );
 }
@@ -4107,14 +4127,12 @@ export default function HomePage() {
             </div>
           ) : (
             <>
-              <div className={'group-summary-sticky'}>
-                <GroupSummary
+              <GroupSummary
                   funds={displayFunds}
                   holdings={holdings}
                   groupName={getGroupName()}
                   getProfit={getHoldingProfit}
                 />
-              </div>
 
               {currentTab !== 'all' && currentTab !== 'fav' && (
                 <motion.button
