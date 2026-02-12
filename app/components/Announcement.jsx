@@ -64,14 +64,7 @@ export default function Announcement() {
             </div>
             
             <div style={{ color: 'var(--text)', lineHeight: '1.6', fontSize: '15px' }}>
-              感谢大家反馈的需求，现已增加如下功能：
-              <p>1. 邮箱账号登录，以支持同步本地数据至云端。</p>
-              <p>2. 加减仓。</p>
-              <p>3. 版本更新提示。</p>
-              <p>4. 性能优化。</p>
-              以下功能会在下一个版本上线：
-              <p>1. 定投。</p>
-              <p>2. 基金历史 K 线。</p>
+              新增多账本管理与数据迁移，支持切换/新建/重命名/删除账本；基金详情新增前10重仓股票弹窗；优化云端同步与滚动条视觉效果。
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>

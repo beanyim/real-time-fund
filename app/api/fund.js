@@ -134,8 +134,7 @@ export const fetchFundDataFallback = async (c) => {
             jzrq: jzrq,
             gszzl: null,
             zzl: !isNaN(zzl) ? zzl : null,
-            noValuation: true,
-            holdings: []
+            noValuation: true
           });
         } else {
           reject(new Error('未能获取到基金数据'));
@@ -202,111 +201,7 @@ export const fetchFundData = async (c) => {
         };
         document.body.appendChild(tScript);
       });
-      const holdingsPromise = new Promise((resolveH) => {
-        const holdingsUrl = `https://fundf10.eastmoney.com/FundArchivesDatas.aspx?type=jjcc&code=${c}&topline=10&year=&month=&_=${Date.now()}`;
-        loadScript(holdingsUrl).then(async () => {
-          let holdings = [];
-          const html = window.apidata?.content || '';
-          const headerRow = (html.match(/<thead[\s\S]*?<tr[\s\S]*?<\/tr>[\s\S]*?<\/thead>/i) || [])[0] || '';
-          const headerCells = (headerRow.match(/<th[\s\S]*?>([\s\S]*?)<\/th>/gi) || []).map(th => th.replace(/<[^>]*>/g, '').trim());
-          let idxCode = -1, idxName = -1, idxWeight = -1;
-          headerCells.forEach((h, i) => {
-            const t = h.replace(/\s+/g, '');
-            if (idxCode < 0 && (t.includes('股票代码') || t.includes('证券代码'))) idxCode = i;
-            if (idxName < 0 && (t.includes('股票名称') || t.includes('证券名称'))) idxName = i;
-            if (idxWeight < 0 && (t.includes('占净值比例') || t.includes('占比'))) idxWeight = i;
-          });
-          const rows = html.match(/<tbody[\s\S]*?<\/tbody>/i) || [];
-          const dataRows = rows.length ? rows[0].match(/<tr[\s\S]*?<\/tr>/gi) || [] : html.match(/<tr[\s\S]*?<\/tr>/gi) || [];
-          for (const r of dataRows) {
-            const tds = (r.match(/<td[\s\S]*?>([\s\S]*?)<\/td>/gi) || []).map(td => td.replace(/<[^>]*>/g, '').trim());
-            if (!tds.length) continue;
-            let code = '';
-            let name = '';
-            let weight = '';
-            if (idxCode >= 0 && tds[idxCode]) {
-              const m = tds[idxCode].match(/(\d{6})/);
-              code = m ? m[1] : tds[idxCode];
-            } else {
-              const codeIdx = tds.findIndex(txt => /^\d{6}$/.test(txt));
-              if (codeIdx >= 0) code = tds[codeIdx];
-            }
-            if (idxName >= 0 && tds[idxName]) {
-              name = tds[idxName];
-            } else if (code) {
-              const i = tds.findIndex(txt => txt && txt !== code && !/%$/.test(txt));
-              name = i >= 0 ? tds[i] : '';
-            }
-            if (idxWeight >= 0 && tds[idxWeight]) {
-              const wm = tds[idxWeight].match(/([\d.]+)\s*%/);
-              weight = wm ? `${wm[1]}%` : tds[idxWeight];
-            } else {
-              const wIdx = tds.findIndex(txt => /\d+(?:\.\d+)?\s*%/.test(txt));
-              weight = wIdx >= 0 ? tds[wIdx].match(/([\d.]+)\s*%/)?.[1] + '%' : '';
-            }
-            if (code || name || weight) {
-              holdings.push({ code, name, weight, change: null });
-            }
-          }
-          holdings = holdings.slice(0, 10);
-          const needQuotes = holdings.filter(h => /^\d{6}$/.test(h.code) || /^\d{5}$/.test(h.code));
-          if (needQuotes.length) {
-            try {
-              const tencentCodes = needQuotes.map(h => {
-                const cd = String(h.code || '');
-                if (/^\d{6}$/.test(cd)) {
-                  const pfx = cd.startsWith('6') || cd.startsWith('9') ? 'sh' : ((cd.startsWith('4') || cd.startsWith('8')) ? 'bj' : 'sz');
-                  return `s_${pfx}${cd}`;
-                }
-                if (/^\d{5}$/.test(cd)) {
-                  return `s_hk${cd}`;
-                }
-                return null;
-              }).filter(Boolean).join(',');
-              if (!tencentCodes) {
-                resolveH(holdings);
-                return;
-              }
-              const quoteUrl = `https://qt.gtimg.cn/q=${tencentCodes}`;
-              await new Promise((resQuote) => {
-                const scriptQuote = document.createElement('script');
-                scriptQuote.src = quoteUrl;
-                scriptQuote.onload = () => {
-                  needQuotes.forEach(h => {
-                    const cd = String(h.code || '');
-                    let varName = '';
-                    if (/^\d{6}$/.test(cd)) {
-                      const pfx = cd.startsWith('6') || cd.startsWith('9') ? 'sh' : ((cd.startsWith('4') || cd.startsWith('8')) ? 'bj' : 'sz');
-                      varName = `v_s_${pfx}${cd}`;
-                    } else if (/^\d{5}$/.test(cd)) {
-                      varName = `v_s_hk${cd}`;
-                    } else {
-                      return;
-                    }
-                    const dataStr = window[varName];
-                    if (dataStr) {
-                      const parts = dataStr.split('~');
-                      if (parts.length > 5) {
-                        h.change = parseFloat(parts[5]);
-                      }
-                    }
-                  });
-                  if (document.body.contains(scriptQuote)) document.body.removeChild(scriptQuote);
-                  resQuote();
-                };
-                scriptQuote.onerror = () => {
-                  if (document.body.contains(scriptQuote)) document.body.removeChild(scriptQuote);
-                  resQuote();
-                };
-                document.body.appendChild(scriptQuote);
-              });
-            } catch (e) {
-            }
-          }
-          resolveH(holdings);
-        }).catch(() => resolveH([]));
-      });
-      Promise.all([tencentPromise, holdingsPromise]).then(([tData, holdings]) => {
+      tencentPromise.then((tData) => {
         if (tData) {
           if (tData.jzrq && (!gzData.jzrq || tData.jzrq >= gzData.jzrq)) {
             gzData.dwjz = tData.dwjz;
@@ -314,7 +209,7 @@ export const fetchFundData = async (c) => {
             gzData.zzl = tData.zzl;
           }
         }
-        resolve({ ...gzData, holdings });
+        resolve({ ...gzData });
       });
     };
     scriptGz.onerror = () => {
@@ -327,6 +222,115 @@ export const fetchFundData = async (c) => {
       if (document.body.contains(scriptGz)) document.body.removeChild(scriptGz);
     }, 5000);
   });
+};
+
+export const fetchFundHoldings = async (c) => {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    throw new Error('无浏览器环境');
+  }
+  try {
+    const holdingsUrl = `https://fundf10.eastmoney.com/FundArchivesDatas.aspx?type=jjcc&code=${c}&topline=10&year=&month=&_=${Date.now()}`;
+    await loadScript(holdingsUrl);
+    let holdings = [];
+    const html = window.apidata?.content || '';
+    const headerRow = (html.match(/<thead[\s\S]*?<tr[\s\S]*?<\/tr>[\s\S]*?<\/thead>/i) || [])[0] || '';
+    const headerCells = (headerRow.match(/<th[\s\S]*?>([\s\S]*?)<\/th>/gi) || []).map(th => th.replace(/<[^>]*>/g, '').trim());
+    let idxCode = -1, idxName = -1, idxWeight = -1;
+    headerCells.forEach((h, i) => {
+      const t = h.replace(/\s+/g, '');
+      if (idxCode < 0 && (t.includes('股票代码') || t.includes('证券代码'))) idxCode = i;
+      if (idxName < 0 && (t.includes('股票名称') || t.includes('证券名称'))) idxName = i;
+      if (idxWeight < 0 && (t.includes('占净值比例') || t.includes('占比'))) idxWeight = i;
+    });
+    const rows = html.match(/<tbody[\s\S]*?<\/tbody>/i) || [];
+    const dataRows = rows.length ? rows[0].match(/<tr[\s\S]*?<\/tr>/gi) || [] : html.match(/<tr[\s\S]*?<\/tr>/gi) || [];
+    for (const r of dataRows) {
+      const tds = (r.match(/<td[\s\S]*?>([\s\S]*?)<\/td>/gi) || []).map(td => td.replace(/<[^>]*>/g, '').trim());
+      if (!tds.length) continue;
+      let code = '';
+      let name = '';
+      let weight = '';
+      if (idxCode >= 0 && tds[idxCode]) {
+        const m = tds[idxCode].match(/(\d{6})/);
+        code = m ? m[1] : tds[idxCode];
+      } else {
+        const codeIdx = tds.findIndex(txt => /^\d{6}$/.test(txt));
+        if (codeIdx >= 0) code = tds[codeIdx];
+      }
+      if (idxName >= 0 && tds[idxName]) {
+        name = tds[idxName];
+      } else if (code) {
+        const i = tds.findIndex(txt => txt && txt !== code && !/%$/.test(txt));
+        name = i >= 0 ? tds[i] : '';
+      }
+      if (idxWeight >= 0 && tds[idxWeight]) {
+        const wm = tds[idxWeight].match(/([\d.]+)\s*%/);
+        weight = wm ? `${wm[1]}%` : tds[idxWeight];
+      } else {
+        const wIdx = tds.findIndex(txt => /\d+(?:\.\d+)?\s*%/.test(txt));
+        weight = wIdx >= 0 ? tds[wIdx].match(/([\d.]+)\s*%/)?.[1] + '%' : '';
+      }
+      if (code || name || weight) {
+        holdings.push({ code, name, weight, change: null });
+      }
+    }
+    holdings = holdings.slice(0, 10);
+    const needQuotes = holdings.filter(h => /^\d{6}$/.test(h.code) || /^\d{5}$/.test(h.code));
+    if (needQuotes.length) {
+      try {
+        const tencentCodes = needQuotes.map(h => {
+          const cd = String(h.code || '');
+          if (/^\d{6}$/.test(cd)) {
+            const pfx = cd.startsWith('6') || cd.startsWith('9') ? 'sh' : ((cd.startsWith('4') || cd.startsWith('8')) ? 'bj' : 'sz');
+            return `s_${pfx}${cd}`;
+          }
+          if (/^\d{5}$/.test(cd)) {
+            return `s_hk${cd}`;
+          }
+          return null;
+        }).filter(Boolean).join(',');
+        if (tencentCodes) {
+          const quoteUrl = `https://qt.gtimg.cn/q=${tencentCodes}`;
+          await new Promise((resQuote) => {
+            const scriptQuote = document.createElement('script');
+            scriptQuote.src = quoteUrl;
+            scriptQuote.onload = () => {
+              needQuotes.forEach(h => {
+                const cd = String(h.code || '');
+                let varName = '';
+                if (/^\d{6}$/.test(cd)) {
+                  const pfx = cd.startsWith('6') || cd.startsWith('9') ? 'sh' : ((cd.startsWith('4') || cd.startsWith('8')) ? 'bj' : 'sz');
+                  varName = `v_s_${pfx}${cd}`;
+                } else if (/^\d{5}$/.test(cd)) {
+                  varName = `v_s_hk${cd}`;
+                } else {
+                  return;
+                }
+                const dataStr = window[varName];
+                if (dataStr) {
+                  const parts = dataStr.split('~');
+                  if (parts.length > 5) {
+                    h.change = parseFloat(parts[5]);
+                  }
+                }
+              });
+              if (document.body.contains(scriptQuote)) document.body.removeChild(scriptQuote);
+              resQuote();
+            };
+            scriptQuote.onerror = () => {
+              if (document.body.contains(scriptQuote)) document.body.removeChild(scriptQuote);
+              resQuote();
+            };
+            document.body.appendChild(scriptQuote);
+          });
+        }
+      } catch (e) {
+      }
+    }
+    return holdings;
+  } catch (e) {
+    throw new Error('重仓数据加载失败');
+  }
 };
 
 export const searchFunds = async (val) => {

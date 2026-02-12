@@ -26,6 +26,31 @@ body {
   color: var(--text);
 }
 
+html,
+body {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(96, 165, 250, 0.7) rgba(15, 23, 42, 0.7);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.6);
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(96, 165, 250, 0.9), rgba(34, 211, 238, 0.9));
+  border-radius: 999px;
+  border: 2px solid rgba(15, 23, 42, 0.6);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(96, 165, 250, 1), rgba(34, 211, 238, 1));
+}
+
 .container {
   max-width: 1120px;
   margin: 0 auto;
@@ -1370,4 +1395,49 @@ input[type="number"] {
     max-width: 100% !important;
     margin: 16px;
   }
+}
+
+/* ========== 账本管理滚动条样式 ========== */
+.portfolio-list {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+.portfolio-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.portfolio-list::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 3px;
+}
+
+.portfolio-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  transition: background 0.2s;
+}
+
+.portfolio-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.portfolio-item {
+  transition: background 0.15s ease;
+}
+
+
+.portfolio-manage-icon {
+  transition: transform 0.15s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.portfolio-manage-icon:hover {
+  transform: translateY(-1px);
+  border-color: rgba(var(--primary-rgb), 0.8);
+  box-shadow: 0 12px 24px rgba(var(--primary-rgb), 0.28), 0 0 0 3px rgba(var(--primary-rgb), 0.22);
+}
+
+.portfolio-manage-icon:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.3), 0 12px 24px rgba(var(--primary-rgb), 0.24);
 }

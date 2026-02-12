@@ -13,7 +13,8 @@ import { ChevronIcon, CloseIcon, CloudIcon, DragIcon, ExitIcon, EyeIcon, EyeOffI
 import githubImg from "./assets/github.svg";
 import weChatGroupImg from "./assets/weChatGroup.png";
 import { supabase, isSupabaseConfigured } from './lib/supabase';
-import { fetchFundData, fetchLatestRelease, fetchShanghaiIndexDate, fetchSmartFundNetValue, searchFunds, submitFeedback } from './api/fund';
+import { isLegacyData, migrateToV2, createEmptyV2Data, createPortfolio, mergeOldDataToPortfolio, validateV2Data, generateId } from './lib/migration';
+import { fetchFundData, fetchFundHoldings, fetchLatestRelease, fetchShanghaiIndexDate, fetchSmartFundNetValue, searchFunds, submitFeedback } from './api/fund';
 import packageJson from '../package.json';
 
 dayjs.extend(utc);
@@ -167,6 +168,70 @@ function FeedbackModal({ onClose, user, onOpenWeChat }) {
   );
 }
 
+function TopHoldingsModal({ fund, items, loading, error, onClose, onRetry }) {
+  return (
+    <motion.div
+      className="modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="前10重仓股票"
+      onClick={onClose}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 20 }}
+        className="glass card modal"
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: 420 }}
+      >
+        <div className="title" style={{ marginBottom: 16, justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 20 }}>📊</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span>前10重仓股票</span>
+              <span className="muted" style={{ fontSize: 12 }}>{fund?.name || '基金'} #{fund?.code || ''}</span>
+            </div>
+          </div>
+          <button className="icon-button" onClick={onClose} style={{ border: 'none', background: 'transparent' }}>
+            <CloseIcon width="20" height="20" />
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="muted" style={{ textAlign: 'center', padding: '16px 0' }}>加载中...</div>
+        ) : error ? (
+          <div style={{ textAlign: 'center', padding: '12px 0' }}>
+            <div className="error-text" style={{ marginBottom: 12 }}>{error}</div>
+            <button className="button" onClick={onRetry} style={{ width: '100%' }}>重试</button>
+          </div>
+        ) : Array.isArray(items) && items.length ? (
+          <div className="list">
+            {items.map((h, idx) => (
+              <div className="item" key={`${h.code || h.name}-${idx}`}>
+                <span className="name">{h.name || h.code}</span>
+                <div className="values">
+                  {typeof h.change === 'number' && (
+                    <span className={`badge ${h.change > 0 ? 'up' : h.change < 0 ? 'down' : ''}`} style={{ marginRight: 8 }}>
+                      {h.change > 0 ? '+' : ''}{h.change.toFixed(2)}%
+                    </span>
+                  )}
+                  <span className="weight">{h.weight || '--'}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="muted" style={{ textAlign: 'center', padding: '12px 0' }}>暂无重仓数据</div>
+        )}
+      </motion.div>
+    </motion.div>
+  );
+}
+
 function WeChatModal({ onClose }) {
   return (
     <motion.div
@@ -189,18 +254,18 @@ function WeChatModal({ onClose }) {
         style={{ maxWidth: '360px', padding: '24px' }}
       >
         <div className="title" style={{ marginBottom: 20, justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span>💬 微信用户交流群</span>
-            </div>
-            <button className="icon-button" onClick={onClose} style={{ border: 'none', background: 'transparent' }}>
-                <CloseIcon width="20" height="20" />
-            </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span>💬 微信用户交流群</span>
+          </div>
+          <button className="icon-button" onClick={onClose} style={{ border: 'none', background: 'transparent' }}>
+            <CloseIcon width="20" height="20" />
+          </button>
         </div>
         <div style={{ display: 'flex', justifyContent: 'center' }}>
-            <img src={weChatGroupImg.src} alt="WeChat Group" style={{ maxWidth: '100%', borderRadius: '8px' }} />
+          <img src={weChatGroupImg.src} alt="WeChat Group" style={{ maxWidth: '100%', borderRadius: '8px' }} />
         </div>
         <p className="muted" style={{ textAlign: 'center', marginTop: 16, fontSize: '14px' }}>
-            扫码加入群聊，获取最新更新与交流
+          扫码加入群聊，获取最新更新与交流
         </p>
       </motion.div>
     </motion.div>
@@ -1894,9 +1959,6 @@ export default function HomePage() {
   // 全局刷新状态
   const [refreshing, setRefreshing] = useState(false);
 
-  // 收起/展开状态
-  const [collapsedCodes, setCollapsedCodes] = useState(new Set());
-
   // 自选状态
   const [favorites, setFavorites] = useState(new Set());
   const [groups, setGroups] = useState([]); // [{ id, name, codes: [] }]
@@ -1949,19 +2011,157 @@ export default function HomePage() {
   const [holdingModal, setHoldingModal] = useState({ open: false, fund: null });
   const [actionModal, setActionModal] = useState({ open: false, fund: null });
   const [tradeModal, setTradeModal] = useState({ open: false, fund: null, type: 'buy' }); // type: 'buy' | 'sell'
+  const [topHoldingsModal, setTopHoldingsModal] = useState({ open: false, fund: null, items: [], loading: false, error: '' });
   const [clearConfirm, setClearConfirm] = useState(null); // { fund }
   const [donateOpen, setDonateOpen] = useState(false);
   const [holdings, setHoldings] = useState({}); // { [code]: { share: number, cost: number } }
   const [pendingTrades, setPendingTrades] = useState([]); // [{ id, fundCode, share, date, ... }]
   const [percentModes, setPercentModes] = useState({}); // { [code]: boolean }
 
+  // 多账本状态
+  const [portfolios, setPortfolios] = useState([]); // 账本列表
+  const [currentPortfolioId, setCurrentPortfolioId] = useState(null); // 当前账本ID
+  const [portfolioModalOpen, setPortfolioModalOpen] = useState(false); // 账本管理弹窗
+  const [portfolioDropdownOpen, setPortfolioDropdownOpen] = useState(false); // 账本下拉菜单
+  const [editingPortfolio, setEditingPortfolio] = useState(null); // 正在编辑的账本
+  const [importChoiceModal, setImportChoiceModal] = useState({ open: false, data: null }); // 导入选择弹窗
+  const [newPortfolioModal, setNewPortfolioModal] = useState({ open: false, callback: null }); // 新建账本弹窗
+  const [newPortfolioName, setNewPortfolioName] = useState(''); // 新建账本名称
+  const [deletePortfolioConfirm, setDeletePortfolioConfirm] = useState(null); // 删除账本确认 { id, name }
+
   const holdingsRef = useRef(holdings);
   const pendingTradesRef = useRef(pendingTrades);
+  const portfolioDropdownRef = useRef(null);
+  const newPortfolioInputRef = useRef(null);
+  const topHoldingsRequestRef = useRef(0);
 
   useEffect(() => {
     holdingsRef.current = holdings;
     pendingTradesRef.current = pendingTrades;
   }, [holdings, pendingTrades]);
+
+  // 当前账本
+  const currentPortfolio = useMemo(() => {
+    if (!portfolios.length) return null;
+    return portfolios.find(p => p.id === currentPortfolioId) || portfolios[0];
+  }, [portfolios, currentPortfolioId]);
+
+  // 账本操作函数
+  const savePortfoliosToStorage = useCallback((newPortfolios, newCurrentId) => {
+    const cleanPortfolios = stripHoldingsFromPortfolios(newPortfolios);
+    const data = {
+      version: 2,
+      refreshMs,
+      viewMode,
+      currentPortfolioId: newCurrentId || currentPortfolioId,
+      portfolios: cleanPortfolios
+    };
+    localStorage.setItem('userConfig', JSON.stringify(data));
+  }, [refreshMs, viewMode, currentPortfolioId]);
+
+  const switchPortfolio = useCallback((portfolioId) => {
+    const portfolio = portfolios.find(p => p.id === portfolioId);
+    if (!portfolio) return;
+    
+    const nextFunds = sanitizeFunds(portfolio.funds || []);
+    const nextFavorites = portfolio.favorites || [];
+    const nextGroups = portfolio.groups || [];
+    const nextHoldings = portfolio.holdings || {};
+    const nextPendingTrades = portfolio.pendingTrades || [];
+
+    setCurrentPortfolioId(portfolioId);
+    setFunds(nextFunds);
+    setFavorites(new Set(nextFavorites));
+    setGroups(nextGroups);
+    setHoldings(nextHoldings);
+    setPendingTrades(nextPendingTrades);
+    setCurrentTab('all');
+
+    localStorage.setItem('funds', JSON.stringify(nextFunds));
+    localStorage.setItem('favorites', JSON.stringify(nextFavorites));
+    localStorage.setItem('groups', JSON.stringify(nextGroups));
+    localStorage.setItem('holdings', JSON.stringify(nextHoldings));
+    localStorage.setItem('pendingTrades', JSON.stringify(nextPendingTrades));
+    
+    // 保存到 localStorage
+    savePortfoliosToStorage(portfolios, portfolioId);
+    
+    // 刷新基金数据
+    const codes = nextFunds.map(f => f.code);
+    if (codes.length) refreshAll(codes);
+  }, [portfolios, refreshMs, viewMode]);
+
+  const addPortfolio = useCallback((name) => {
+    const newPortfolio = createPortfolio(name || '新账本');
+    const newPortfolios = [...portfolios, newPortfolio];
+    setPortfolios(newPortfolios);
+    savePortfoliosToStorage(newPortfolios, currentPortfolioId);
+    return newPortfolio;
+  }, [portfolios, currentPortfolioId, savePortfoliosToStorage]);
+
+  const renamePortfolio = useCallback((portfolioId, newName) => {
+    const newPortfolios = portfolios.map(p => 
+      p.id === portfolioId ? { ...p, name: newName } : p
+    );
+    setPortfolios(newPortfolios);
+    savePortfoliosToStorage(newPortfolios, currentPortfolioId);
+  }, [portfolios, currentPortfolioId, savePortfoliosToStorage]);
+
+  const deletePortfolio = useCallback((portfolioId) => {
+    if (portfolios.length <= 1) return; // 至少保留一个账本
+    
+    const newPortfolios = portfolios.filter(p => p.id !== portfolioId);
+    setPortfolios(newPortfolios);
+    
+    // 如果删除的是当前账本，切换到第一个
+    if (portfolioId === currentPortfolioId) {
+      const nextPortfolio = newPortfolios[0];
+      setCurrentPortfolioId(nextPortfolio.id);
+      setFunds(sanitizeFunds(nextPortfolio.funds || []));
+      setFavorites(new Set(nextPortfolio.favorites || []));
+      setGroups(nextPortfolio.groups || []);
+      setHoldings(nextPortfolio.holdings || {});
+      setPendingTrades(nextPortfolio.pendingTrades || []);
+      setCurrentTab('all');
+      savePortfoliosToStorage(newPortfolios, nextPortfolio.id);
+    } else {
+      savePortfoliosToStorage(newPortfolios, currentPortfolioId);
+    }
+  }, [portfolios, currentPortfolioId, savePortfoliosToStorage]);
+
+  // 更新当前账本数据
+  const updateCurrentPortfolio = useCallback((updates) => {
+    if (!currentPortfolioId) return;
+    const newPortfolios = portfolios.map(p => 
+      p.id === currentPortfolioId ? { ...p, ...updates } : p
+    );
+    setPortfolios(newPortfolios);
+    savePortfoliosToStorage(newPortfolios, currentPortfolioId);
+  }, [portfolios, currentPortfolioId, savePortfoliosToStorage]);
+
+  // 点击外部关闭账本下拉菜单
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (portfolioDropdownRef.current && !portfolioDropdownRef.current.contains(e.target)) {
+        setPortfolioDropdownOpen(false);
+      }
+    };
+    if (portfolioDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [portfolioDropdownOpen]);
+
+  useEffect(() => {
+    if (!newPortfolioModal.open) return;
+    requestAnimationFrame(() => {
+      const input = newPortfolioInputRef.current;
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    });
+  }, [newPortfolioModal.open]);
 
   const [isTradingDay, setIsTradingDay] = useState(true); // 默认为交易日，通过接口校正
   const tabsRef = useRef(null);
@@ -2197,6 +2397,7 @@ export default function HomePage() {
         next[code] = data;
       }
       storageHelper.setItem('holdings', JSON.stringify(next));
+      updateCurrentPortfolio({ holdings: next });
       return next;
     });
     setHoldingModal({ open: false, fund: null });
@@ -2263,10 +2464,12 @@ export default function HomePage() {
     if (stateChanged) {
       setHoldings(tempHoldings);
       storageHelper.setItem('holdings', JSON.stringify(tempHoldings));
+      updateCurrentPortfolio({ holdings: tempHoldings });
 
       setPendingTrades(prev => {
           const next = prev.filter(t => !processedIds.has(t.id));
           storageHelper.setItem('pendingTrades', JSON.stringify(next));
+          updateCurrentPortfolio({ pendingTrades: next });
           return next;
       });
 
@@ -2387,7 +2590,14 @@ export default function HomePage() {
   };
 
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
-  const [cloudConfigModal, setCloudConfigModal] = useState({ open: false, userId: null });
+  const [cloudConfigModal, setCloudConfigModal] = useState({
+    open: false,
+    userId: null,
+    type: null,
+    cloudData: null,
+    updatedAt: null
+  });
+  const [cloudConflictConfirm, setCloudConflictConfirm] = useState({ open: false, action: null });
   const syncDebounceRef = useRef(null);
   const lastSyncedRef = useRef('');
   const skipSyncRef = useRef(false);
@@ -2432,14 +2642,59 @@ export default function HomePage() {
   }, []);
 
   const storageHelper = useMemo(() => {
-    const keys = new Set(['funds', 'favorites', 'groups', 'collapsedCodes', 'refreshMs', 'holdings', 'pendingTrades', 'viewMode']);
+    const portfolioKeys = new Set(['funds', 'favorites', 'groups', 'holdings', 'pendingTrades']);
+    const userKeys = new Set(['refreshMs', 'viewMode']);
+    
+    const saveToUserConfig = () => {
+      try {
+        const configStr = localStorage.getItem('userConfig');
+        if (!configStr) return;
+        const config = JSON.parse(configStr);
+        if (!config || config.version < 2) return;
+        
+        // 更新当前账本数据
+        const portfolioId = config.currentPortfolioId;
+        const rawFunds = JSON.parse(localStorage.getItem('funds') || '[]');
+        const cleanedFunds = stripHoldingsFromFunds(rawFunds);
+        const rawFavorites = JSON.parse(localStorage.getItem('favorites') || '[]');
+        const rawGroups = JSON.parse(localStorage.getItem('groups') || '[]');
+        const rawHoldings = JSON.parse(localStorage.getItem('holdings') || '{}');
+        const rawPendingTrades = JSON.parse(localStorage.getItem('pendingTrades') || '[]');
+        config.portfolios = config.portfolios.map(p => {
+          if (p.id === portfolioId) {
+            return {
+              ...p,
+              funds: cleanedFunds,
+              favorites: rawFavorites,
+              groups: rawGroups,
+              holdings: rawHoldings,
+              pendingTrades: rawPendingTrades
+            };
+          }
+          return p;
+        });
+        
+        // 更新用户级配置
+        config.refreshMs = parseInt(localStorage.getItem('refreshMs') || '30000', 10);
+        config.viewMode = localStorage.getItem('viewMode') || 'card';
+        
+        localStorage.setItem('userConfig', JSON.stringify(config));
+      } catch (e) {
+        console.error('保存 userConfig 失败:', e);
+      }
+    };
+    
     const triggerSync = (key, prevValue, nextValue) => {
-      if (keys.has(key)) {
+      if (portfolioKeys.has(key) || userKeys.has(key)) {
         if (key === 'funds') {
           const prevSig = getFundCodesSignature(prevValue);
           const nextSig = getFundCodesSignature(nextValue);
           if (prevSig === nextSig) return;
         }
+        
+        // 同步更新 userConfig
+        saveToUserConfig();
+        
         if (!skipSyncRef.current) {
           window.localStorage.setItem('localUpdatedAt', nowInTz().toISOString());
         }
@@ -2468,7 +2723,7 @@ export default function HomePage() {
   }, [getFundCodesSignature, scheduleSync]);
 
   useEffect(() => {
-    const keys = new Set(['funds', 'favorites', 'groups', 'collapsedCodes', 'refreshMs', 'holdings', 'pendingTrades', 'viewMode']);
+    const keys = new Set(['funds', 'favorites', 'groups', 'refreshMs', 'holdings', 'pendingTrades', 'viewMode']);
     const onStorage = (e) => {
       if (!e.key) return;
       if (!keys.has(e.key)) return;
@@ -2506,19 +2761,29 @@ export default function HomePage() {
     });
   };
 
-  const toggleCollapse = (code) => {
-    setCollapsedCodes(prev => {
-      const next = new Set(prev);
-      if (next.has(code)) {
-        next.delete(code);
-      } else {
-        next.add(code);
-      }
-      // 同步到本地存储
-      storageHelper.setItem('collapsedCodes', JSON.stringify(Array.from(next)));
-      return next;
-    });
+  const openTopHoldingsModal = async (fund) => {
+    if (!fund?.code) return;
+    const requestId = ++topHoldingsRequestRef.current;
+    setTopHoldingsModal({ open: true, fund, items: [], loading: true, error: '' });
+    try {
+      const items = await fetchFundHoldings(fund.code);
+      if (topHoldingsRequestRef.current !== requestId) return;
+      setTopHoldingsModal((prev) => prev.open
+        ? { ...prev, items: Array.isArray(items) ? items : [], loading: false, error: '' }
+        : prev);
+    } catch (e) {
+      if (topHoldingsRequestRef.current !== requestId) return;
+      setTopHoldingsModal((prev) => prev.open
+        ? { ...prev, items: [], loading: false, error: '加载失败，请重试' }
+        : prev);
+    }
   };
+
+  const closeTopHoldingsModal = () => {
+    topHoldingsRequestRef.current += 1;
+    setTopHoldingsModal({ open: false, fund: null, items: [], loading: false, error: '' });
+  };
+
 
   const handleAddGroup = (name) => {
     const newGroup = {
@@ -2606,51 +2871,135 @@ export default function HomePage() {
     });
   };
 
+  const stripHoldingsFromFunds = (list) => {
+    if (!Array.isArray(list)) return [];
+    return list.map((f) => {
+      if (!f || typeof f !== 'object') return f;
+      const { holdings, ...rest } = f;
+      return rest;
+    });
+  };
+
+  const stripHoldingsFromPortfolios = (list) => {
+    if (!Array.isArray(list)) return [];
+    return list.map((p) => {
+      if (!p || typeof p !== 'object') return p;
+      const funds = stripHoldingsFromFunds(p.funds || []);
+      return { ...p, funds };
+    });
+  };
+
+  const sanitizeFunds = (list) => dedupeByCode(stripHoldingsFromFunds(list));
+
+  // 初始化数据加载 - 支持多账本
   useEffect(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem('funds') || '[]');
-      if (Array.isArray(saved) && saved.length) {
-        const deduped = dedupeByCode(saved);
-        setFunds(deduped);
-        storageHelper.setItem('funds', JSON.stringify(deduped));
-        const codes = Array.from(new Set(deduped.map((f) => f.code)));
-        if (codes.length) refreshAll(codes);
+      // 尝试加载 v2 数据结构
+      const userConfigStr = localStorage.getItem('userConfig');
+      let userConfig = null;
+      
+      if (userConfigStr) {
+        try {
+          userConfig = JSON.parse(userConfigStr);
+        } catch {}
       }
-      const savedMs = parseInt(localStorage.getItem('refreshMs') || '30000', 10);
-      if (Number.isFinite(savedMs) && savedMs >= 5000) {
-        setRefreshMs(savedMs);
-        setTempSeconds(Math.round(savedMs / 1000));
+      
+      // 检查是否有 v2 数据
+      if (userConfig && userConfig.version >= 2 && Array.isArray(userConfig.portfolios)) {
+        // v2 数据结构
+        const validatedConfig = validateV2Data(userConfig);
+        const cleanedPortfolios = stripHoldingsFromPortfolios(validatedConfig.portfolios || []);
+        const cleanedConfig = {
+          ...validatedConfig,
+          portfolios: cleanedPortfolios
+        };
+        localStorage.setItem('userConfig', JSON.stringify(cleanedConfig));
+        setPortfolios(cleanedPortfolios);
+        setCurrentPortfolioId(validatedConfig.currentPortfolioId);
+        setRefreshMs(validatedConfig.refreshMs);
+        setTempSeconds(Math.round(validatedConfig.refreshMs / 1000));
+        setViewMode(validatedConfig.viewMode);
+        
+        // 加载当前账本数据
+        const currentP = cleanedPortfolios.find(p => p.id === validatedConfig.currentPortfolioId) 
+          || cleanedPortfolios[0];
+        if (currentP) {
+          const dedupedFunds = sanitizeFunds(currentP.funds || []);
+          setFunds(dedupedFunds);
+          setFavorites(new Set(currentP.favorites || []));
+          setGroups(currentP.groups || []);
+          setHoldings(currentP.holdings || {});
+          setPendingTrades(currentP.pendingTrades || []);
+          
+          const codes = dedupedFunds.map(f => f.code);
+          if (codes.length) refreshAll(codes);
+        }
+      } else {
+        // 尝试从老数据结构迁移
+        const oldFunds = JSON.parse(localStorage.getItem('funds') || '[]');
+        const oldFavorites = JSON.parse(localStorage.getItem('favorites') || '[]');
+        const oldGroups = JSON.parse(localStorage.getItem('groups') || '[]');
+        const oldHoldings = JSON.parse(localStorage.getItem('holdings') || '{}');
+        const oldPending = JSON.parse(localStorage.getItem('pendingTrades') || '[]');
+        const oldRefreshMs = parseInt(localStorage.getItem('refreshMs') || '30000', 10);
+        const oldViewMode = localStorage.getItem('viewMode');
+        
+        // 检查是否有老数据
+        const hasOldData = Array.isArray(oldFunds) && oldFunds.length > 0;
+        
+        if (hasOldData) {
+          // 迁移老数据到 v2 结构
+          const oldData = {
+            funds: oldFunds,
+            favorites: oldFavorites,
+            groups: oldGroups,
+            holdings: oldHoldings,
+            pendingTrades: oldPending,
+            refreshMs: oldRefreshMs,
+            viewMode: oldViewMode || 'card'
+          };
+          const v2Data = migrateToV2(oldData, '默认账本');
+          const cleanedV2Data = {
+            ...v2Data,
+            portfolios: stripHoldingsFromPortfolios(v2Data.portfolios || [])
+          };
+          
+          // 保存 v2 数据
+          localStorage.setItem('userConfig', JSON.stringify(cleanedV2Data));
+          
+          // 设置状态
+          setPortfolios(cleanedV2Data.portfolios);
+          setCurrentPortfolioId(cleanedV2Data.currentPortfolioId);
+          setRefreshMs(cleanedV2Data.refreshMs);
+          setTempSeconds(Math.round(cleanedV2Data.refreshMs / 1000));
+          setViewMode(cleanedV2Data.viewMode);
+          
+          const currentP = cleanedV2Data.portfolios[0];
+          const dedupedFunds = sanitizeFunds(currentP.funds);
+          setFunds(dedupedFunds);
+          setFavorites(new Set(currentP.favorites));
+          setGroups(currentP.groups);
+          setHoldings(currentP.holdings);
+          setPendingTrades(currentP.pendingTrades);
+          
+          const codes = dedupedFunds.map(f => f.code);
+          if (codes.length) refreshAll(codes);
+        } else {
+          // 没有任何数据，创建空的 v2 结构
+          const emptyV2 = createEmptyV2Data();
+          localStorage.setItem('userConfig', JSON.stringify(emptyV2));
+          setPortfolios(emptyV2.portfolios);
+          setCurrentPortfolioId(emptyV2.currentPortfolioId);
+        }
       }
-      // 加载收起状态
-      const savedCollapsed = JSON.parse(localStorage.getItem('collapsedCodes') || '[]');
-      if (Array.isArray(savedCollapsed)) {
-        setCollapsedCodes(new Set(savedCollapsed));
-      }
-      // 加载自选状态
-      const savedFavorites = JSON.parse(localStorage.getItem('favorites') || '[]');
-      if (Array.isArray(savedFavorites)) {
-        setFavorites(new Set(savedFavorites));
-      }
-      // 加载待处理交易
-      const savedPending = JSON.parse(localStorage.getItem('pendingTrades') || '[]');
-      if (Array.isArray(savedPending)) {
-        setPendingTrades(savedPending);
-      }
-      // 加载分组状态
-      const savedGroups = JSON.parse(localStorage.getItem('groups') || '[]');
-      if (Array.isArray(savedGroups)) {
-        setGroups(savedGroups);
-      }
-      // 加载持仓数据
-      const savedHoldings = JSON.parse(localStorage.getItem('holdings') || '{}');
-      if (savedHoldings && typeof savedHoldings === 'object') {
-        setHoldings(savedHoldings);
-      }
-      const savedViewMode = localStorage.getItem('viewMode');
-      if (savedViewMode === 'card' || savedViewMode === 'list') {
-        setViewMode(savedViewMode);
-      }
-    } catch { }
+    } catch (e) {
+      console.error('初始化数据加载失败:', e);
+      // 出错时创建空的 v2 结构
+      const emptyV2 = createEmptyV2Data();
+      localStorage.setItem('userConfig', JSON.stringify(emptyV2));
+      setPortfolios(emptyV2.portfolios);
+      setCurrentPortfolioId(emptyV2.currentPortfolioId);
+    }
   }, []);
 
   // 初始化认证状态监听
@@ -2953,9 +3302,10 @@ export default function HomePage() {
       }
 
       if (newFunds.length > 0) {
-        const updated = dedupeByCode([...newFunds, ...funds]);
+        const updated = sanitizeFunds([...newFunds, ...funds]);
         setFunds(updated);
         storageHelper.setItem('funds', JSON.stringify(updated));
+        updateCurrentPortfolio({ funds: updated });
       }
 
       setSelectedFunds([]);
@@ -3002,7 +3352,7 @@ export default function HomePage() {
               merged.push(u);
             }
           });
-          const deduped = dedupeByCode(merged);
+          const deduped = sanitizeFunds(merged);
           storageHelper.setItem('funds', JSON.stringify(deduped));
           return deduped;
         });
@@ -3068,9 +3418,10 @@ export default function HomePage() {
       if (newFunds.length === 0) {
         setError('未添加任何新基金');
       } else {
-        const next = dedupeByCode([...newFunds, ...funds]);
+        const next = sanitizeFunds([...newFunds, ...funds]);
         setFunds(next);
         storageHelper.setItem('funds', JSON.stringify(next));
+        updateCurrentPortfolio({ funds: next });
       }
       setSearchTerm('');
       setSelectedFunds([]);
@@ -3099,39 +3450,30 @@ export default function HomePage() {
     setGroups(nextGroups);
     storageHelper.setItem('groups', JSON.stringify(nextGroups));
 
-    // 同步删除展开收起状态
-    setCollapsedCodes(prev => {
-      if (!prev.has(removeCode)) return prev;
-      const nextSet = new Set(prev);
-      nextSet.delete(removeCode);
-      storageHelper.setItem('collapsedCodes', JSON.stringify(Array.from(nextSet)));
-      return nextSet;
-    });
-
     // 同步删除自选状态
-    setFavorites(prev => {
-      if (!prev.has(removeCode)) return prev;
-      const nextSet = new Set(prev);
-      nextSet.delete(removeCode);
-      storageHelper.setItem('favorites', JSON.stringify(Array.from(nextSet)));
-      if (nextSet.size === 0) setCurrentTab('all');
-      return nextSet;
-    });
+    const nextFavorites = new Set(favorites);
+    nextFavorites.delete(removeCode);
+    setFavorites(nextFavorites);
+    storageHelper.setItem('favorites', JSON.stringify(Array.from(nextFavorites)));
+    if (nextFavorites.size === 0) setCurrentTab('all');
 
     // 同步删除持仓数据
-    setHoldings(prev => {
-      if (!prev[removeCode]) return prev;
-      const next = { ...prev };
-      delete next[removeCode];
-      storageHelper.setItem('holdings', JSON.stringify(next));
-      return next;
-    });
+    const nextHoldings = { ...holdings };
+    delete nextHoldings[removeCode];
+    setHoldings(nextHoldings);
+    storageHelper.setItem('holdings', JSON.stringify(nextHoldings));
 
     // 同步删除待处理交易
-    setPendingTrades(prev => {
-      const next = prev.filter((trade) => trade?.fundCode !== removeCode);
-      storageHelper.setItem('pendingTrades', JSON.stringify(next));
-      return next;
+    const nextPendingTrades = pendingTrades.filter((trade) => trade?.fundCode !== removeCode);
+    setPendingTrades(nextPendingTrades);
+    storageHelper.setItem('pendingTrades', JSON.stringify(nextPendingTrades));
+
+    updateCurrentPortfolio({
+      funds: next,
+      groups: nextGroups,
+      favorites: Array.from(nextFavorites),
+      holdings: nextHoldings,
+      pendingTrades: nextPendingTrades
     });
   };
 
@@ -3151,7 +3493,57 @@ export default function HomePage() {
   };
 
   const importFileRef = useRef(null);
+  const importProgressTimerRef = useRef(null);
   const [importMsg, setImportMsg] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
+  const importCircleRadius = 38;
+  const importCircleCircumference = 2 * Math.PI * importCircleRadius;
+  const importCircleOffset = importCircleCircumference * (1 - importProgress / 100);
+
+  useEffect(() => () => {
+    if (importProgressTimerRef.current) {
+      clearInterval(importProgressTimerRef.current);
+      importProgressTimerRef.current = null;
+    }
+  }, []);
+
+  const startImportProgress = useCallback(() => {
+    if (importProgressTimerRef.current) {
+      clearInterval(importProgressTimerRef.current);
+    }
+    setIsImporting(true);
+    setImportProgress(0);
+    importProgressTimerRef.current = setInterval(() => {
+      setImportProgress((prev) => {
+        if (prev >= 95) return prev;
+        const step = prev < 60 ? 6 : 3;
+        return Math.min(95, prev + step);
+      });
+    }, 120);
+  }, []);
+
+  const finishImportProgress = useCallback(() => new Promise((resolve) => {
+    if (importProgressTimerRef.current) {
+      clearInterval(importProgressTimerRef.current);
+      importProgressTimerRef.current = null;
+    }
+    setImportProgress(100);
+    setTimeout(() => {
+      setIsImporting(false);
+      setImportProgress(0);
+      resolve();
+    }, 360);
+  }), []);
+
+  const cancelImportProgress = useCallback(() => {
+    if (importProgressTimerRef.current) {
+      clearInterval(importProgressTimerRef.current);
+      importProgressTimerRef.current = null;
+    }
+    setIsImporting(false);
+    setImportProgress(0);
+  }, []);
 
   const normalizeCode = (value) => String(value || '').trim();
   const normalizeNumber = (value) => {
@@ -3162,6 +3554,69 @@ export default function HomePage() {
 
   function getComparablePayload(payload) {
     if (!payload || typeof payload !== 'object') return '';
+    
+    // 支持 v2 多账本数据结构
+    if (payload.version >= 2 && Array.isArray(payload.portfolios)) {
+      const portfoliosComparable = payload.portfolios.map(p => {
+        const rawFunds = Array.isArray(p.funds) ? p.funds : [];
+        const fundCodes = rawFunds.map(f => normalizeCode(f?.code || f?.CODE)).filter(Boolean);
+        const uniqueFundCodes = Array.from(new Set(fundCodes)).sort();
+        
+        return {
+          id: p.id,
+          name: p.name,
+          funds: uniqueFundCodes,
+          favorites: Array.isArray(p.favorites) 
+            ? Array.from(new Set(p.favorites.map(normalizeCode).filter(c => uniqueFundCodes.includes(c)))).sort()
+            : [],
+          groups: Array.isArray(p.groups)
+            ? p.groups.map(g => ({
+                id: normalizeCode(g?.id),
+                name: g?.name || '',
+                codes: Array.isArray(g?.codes) 
+                  ? Array.from(new Set(g.codes.map(normalizeCode).filter(c => uniqueFundCodes.includes(c)))).sort()
+                  : []
+              })).filter(g => g.id).sort((a, b) => a.id.localeCompare(b.id))
+            : [],
+          holdings: (() => {
+            const h = p.holdings && typeof p.holdings === 'object' ? p.holdings : {};
+            const result = {};
+            Object.keys(h).map(normalizeCode).filter(c => uniqueFundCodes.includes(c)).sort().forEach(code => {
+              const v = h[code] || {};
+              const share = normalizeNumber(v.share);
+              const cost = normalizeNumber(v.cost);
+              if (share !== null || cost !== null) result[code] = { share, cost };
+            });
+            return result;
+          })(),
+          pendingTrades: Array.isArray(p.pendingTrades)
+            ? p.pendingTrades.map(t => ({
+                id: t?.id ? String(t.id) : '',
+                fundCode: normalizeCode(t?.fundCode),
+                type: t?.type || '',
+                share: normalizeNumber(t?.share),
+                amount: normalizeNumber(t?.amount),
+                feeRate: normalizeNumber(t?.feeRate),
+                feeMode: t?.feeMode || '',
+                feeValue: normalizeNumber(t?.feeValue),
+                date: t?.date || '',
+                isAfter3pm: !!t?.isAfter3pm
+              })).filter(t => t.fundCode && uniqueFundCodes.includes(t.fundCode))
+                .sort((a, b) => (a.id || a.fundCode).localeCompare(b.id || b.fundCode))
+            : []
+        };
+      }).sort((a, b) => a.id.localeCompare(b.id));
+      
+      return JSON.stringify({
+        version: 2,
+        refreshMs: Number.isFinite(payload.refreshMs) ? payload.refreshMs : 30000,
+        viewMode: payload.viewMode === 'list' ? 'list' : 'card',
+        currentPortfolioId: payload.currentPortfolioId || '',
+        portfolios: portfoliosComparable
+      });
+    }
+    
+    // 兼容老数据结构 (v1)
     const rawFunds = Array.isArray(payload.funds) ? payload.funds : [];
     const fundCodes = rawFunds
       .map((fund) => normalizeCode(fund?.code || fund?.CODE))
@@ -3170,10 +3625,6 @@ export default function HomePage() {
 
     const favorites = Array.isArray(payload.favorites)
       ? Array.from(new Set(payload.favorites.map(normalizeCode).filter((code) => uniqueFundCodes.includes(code)))).sort()
-      : [];
-
-    const collapsedCodes = Array.isArray(payload.collapsedCodes)
-      ? Array.from(new Set(payload.collapsedCodes.map(normalizeCode).filter((code) => uniqueFundCodes.includes(code)))).sort()
       : [];
 
     const groups = Array.isArray(payload.groups)
@@ -3239,7 +3690,6 @@ export default function HomePage() {
       funds: uniqueFundCodes,
       favorites,
       groups,
-      collapsedCodes,
       refreshMs: Number.isFinite(payload.refreshMs) ? payload.refreshMs : 30000,
       holdings,
       pendingTrades,
@@ -3249,10 +3699,23 @@ export default function HomePage() {
 
   const collectLocalPayload = () => {
     try {
-      const funds = JSON.parse(localStorage.getItem('funds') || '[]');
+      // 优先使用 v2 数据结构
+      const userConfigStr = localStorage.getItem('userConfig');
+      if (userConfigStr) {
+        const userConfig = JSON.parse(userConfigStr);
+        if (userConfig && userConfig.version >= 2) {
+          return {
+            ...userConfig,
+            portfolios: stripHoldingsFromPortfolios(userConfig.portfolios || []),
+            exportedAt: nowInTz().toISOString()
+          };
+        }
+      }
+      
+      // 降级到老数据结构
+      const funds = stripHoldingsFromFunds(JSON.parse(localStorage.getItem('funds') || '[]'));
       const favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
       const groups = JSON.parse(localStorage.getItem('groups') || '[]');
-      const collapsedCodes = JSON.parse(localStorage.getItem('collapsedCodes') || '[]');
       const viewMode = localStorage.getItem('viewMode') === 'list' ? 'list' : 'card';
       const fundCodes = new Set(
         Array.isArray(funds)
@@ -3288,9 +3751,6 @@ export default function HomePage() {
       const cleanedFavorites = Array.isArray(favorites)
         ? favorites.filter((code) => fundCodes.has(code))
         : [];
-      const cleanedCollapsed = Array.isArray(collapsedCodes)
-        ? collapsedCodes.filter((code) => fundCodes.has(code))
-        : [];
       const cleanedGroups = Array.isArray(groups)
         ? groups.map((group) => ({
           ...group,
@@ -3306,7 +3766,6 @@ export default function HomePage() {
         funds,
         favorites: cleanedFavorites,
         groups: cleanedGroups,
-        collapsedCodes: cleanedCollapsed,
         refreshMs: parseInt(localStorage.getItem('refreshMs') || '30000', 10),
         holdings: cleanedHoldings,
         pendingTrades: cleanedPendingTrades,
@@ -3318,7 +3777,6 @@ export default function HomePage() {
         funds: [],
         favorites: [],
         groups: [],
-        collapsedCodes: [],
         refreshMs: 30000,
         holdings: {},
         pendingTrades: [],
@@ -3333,47 +3791,94 @@ export default function HomePage() {
     skipSyncRef.current = true;
     try {
       if (cloudUpdatedAt) {
-        storageHelper.setItem('localUpdatedAt', toTz(cloudUpdatedAt).toISOString());
+        localStorage.setItem('localUpdatedAt', toTz(cloudUpdatedAt).toISOString());
       }
-      const nextFunds = Array.isArray(cloudData.funds) ? dedupeByCode(cloudData.funds) : [];
-      setFunds(nextFunds);
-      storageHelper.setItem('funds', JSON.stringify(nextFunds));
-      const nextFundCodes = new Set(nextFunds.map((f) => f.code));
+      
+      // 检查是否为 v2 多账本数据结构
+      if (cloudData.version >= 2 && Array.isArray(cloudData.portfolios)) {
+        // v2 数据结构
+        const validatedConfig = validateV2Data(cloudData);
+        const cleanedPortfolios = stripHoldingsFromPortfolios(validatedConfig.portfolios || []);
+        const cleanedConfig = { ...validatedConfig, portfolios: cleanedPortfolios };
+        
+        // 保存到 localStorage
+        localStorage.setItem('userConfig', JSON.stringify(cleanedConfig));
+        
+        // 更新状态
+        setPortfolios(cleanedPortfolios);
+        setCurrentPortfolioId(validatedConfig.currentPortfolioId);
+        setRefreshMs(validatedConfig.refreshMs);
+        setTempSeconds(Math.round(validatedConfig.refreshMs / 1000));
+        setViewMode(validatedConfig.viewMode);
+        
+        // 加载当前账本数据
+        const currentP = cleanedPortfolios.find(p => p.id === validatedConfig.currentPortfolioId) 
+          || cleanedPortfolios[0];
+        if (currentP) {
+          const dedupedFunds = sanitizeFunds(currentP.funds || []);
+          setFunds(dedupedFunds);
+          setFavorites(new Set(currentP.favorites || []));
+          setGroups(currentP.groups || []);
+          setHoldings(currentP.holdings || {});
+          setPendingTrades(currentP.pendingTrades || []);
+          
+          // 同步到老的 localStorage keys（兼容）
+          localStorage.setItem('funds', JSON.stringify(dedupedFunds));
+          localStorage.setItem('favorites', JSON.stringify(currentP.favorites || []));
+          localStorage.setItem('groups', JSON.stringify(currentP.groups || []));
+          localStorage.setItem('holdings', JSON.stringify(currentP.holdings || {}));
+          localStorage.setItem('pendingTrades', JSON.stringify(currentP.pendingTrades || []));
+          localStorage.setItem('refreshMs', String(validatedConfig.refreshMs));
+          localStorage.setItem('viewMode', validatedConfig.viewMode);
+          
+          const codes = dedupedFunds.map(f => f.code);
+          if (codes.length) await refreshAll(codes);
+        }
+      } else {
+        // 老数据结构 (v1) - 迁移为 v2
+        const v2Data = migrateToV2(cloudData, '默认账本');
+        localStorage.setItem('userConfig', JSON.stringify(v2Data));
+        
+        setPortfolios(v2Data.portfolios);
+        setCurrentPortfolioId(v2Data.currentPortfolioId);
+        
+        const nextFunds = Array.isArray(cloudData.funds) ? sanitizeFunds(cloudData.funds) : [];
+        setFunds(nextFunds);
+        localStorage.setItem('funds', JSON.stringify(nextFunds));
+        const nextFundCodes = new Set(nextFunds.map((f) => f.code));
 
-      const nextFavorites = Array.isArray(cloudData.favorites) ? cloudData.favorites : [];
-      setFavorites(new Set(nextFavorites));
-      storageHelper.setItem('favorites', JSON.stringify(nextFavorites));
+        const nextFavorites = Array.isArray(cloudData.favorites) ? cloudData.favorites : [];
+        setFavorites(new Set(nextFavorites));
+        localStorage.setItem('favorites', JSON.stringify(nextFavorites));
 
-      const nextGroups = Array.isArray(cloudData.groups) ? cloudData.groups : [];
-      setGroups(nextGroups);
-      storageHelper.setItem('groups', JSON.stringify(nextGroups));
+        const nextGroups = Array.isArray(cloudData.groups) ? cloudData.groups : [];
+        setGroups(nextGroups);
+        localStorage.setItem('groups', JSON.stringify(nextGroups));
 
-      const nextCollapsed = Array.isArray(cloudData.collapsedCodes) ? cloudData.collapsedCodes : [];
-      setCollapsedCodes(new Set(nextCollapsed));
-      storageHelper.setItem('collapsedCodes', JSON.stringify(nextCollapsed));
+        const nextRefreshMs = Number.isFinite(cloudData.refreshMs) && cloudData.refreshMs >= 5000 ? cloudData.refreshMs : 30000;
+        setRefreshMs(nextRefreshMs);
+        setTempSeconds(Math.round(nextRefreshMs / 1000));
+        localStorage.setItem('refreshMs', String(nextRefreshMs));
 
-      const nextRefreshMs = Number.isFinite(cloudData.refreshMs) && cloudData.refreshMs >= 5000 ? cloudData.refreshMs : 30000;
-      setRefreshMs(nextRefreshMs);
-      setTempSeconds(Math.round(nextRefreshMs / 1000));
-      storageHelper.setItem('refreshMs', String(nextRefreshMs));
+        if (cloudData.viewMode === 'card' || cloudData.viewMode === 'list') {
+          setViewMode(cloudData.viewMode);
+          localStorage.setItem('viewMode', cloudData.viewMode);
+        }
 
-      if (cloudData.viewMode === 'card' || cloudData.viewMode === 'list') {
-        applyViewMode(cloudData.viewMode);
-      }
+        const nextHoldings = cloudData.holdings && typeof cloudData.holdings === 'object' ? cloudData.holdings : {};
+        setHoldings(nextHoldings);
+        localStorage.setItem('holdings', JSON.stringify(nextHoldings));
 
-      const nextHoldings = cloudData.holdings && typeof cloudData.holdings === 'object' ? cloudData.holdings : {};
-      setHoldings(nextHoldings);
-      storageHelper.setItem('holdings', JSON.stringify(nextHoldings));
+        const nextPendingTrades = Array.isArray(cloudData.pendingTrades)
+          ? cloudData.pendingTrades.filter((trade) => trade && nextFundCodes.has(trade.fundCode))
+          : [];
+        setPendingTrades(nextPendingTrades);
+        localStorage.setItem('pendingTrades', JSON.stringify(nextPendingTrades));
 
-      const nextPendingTrades = Array.isArray(cloudData.pendingTrades)
-        ? cloudData.pendingTrades.filter((trade) => trade && nextFundCodes.has(trade.fundCode))
-        : [];
-      setPendingTrades(nextPendingTrades);
-      storageHelper.setItem('pendingTrades', JSON.stringify(nextPendingTrades));
-
-      if (nextFunds.length) {
-        const codes = Array.from(new Set(nextFunds.map((f) => f.code)));
-        if (codes.length) await refreshAll(codes);
+        if (nextFunds.length) {
+          const codes = Array.from(new Set(nextFunds.map((f) => f.code)));
+          if (codes.length) await refreshAll(codes);
+        }
       }
 
       const payload = collectLocalPayload();
@@ -3397,7 +3902,13 @@ export default function HomePage() {
           .from('user_configs')
           .insert({ user_id: userId });
         if (insertError) throw insertError;
-        setCloudConfigModal({ open: true, userId, type: 'empty' });
+        setCloudConfigModal({
+          open: true,
+          userId,
+          type: 'empty',
+          cloudData: null,
+          updatedAt: null
+        });
         return;
       }
       if (data?.data && typeof data.data === 'object' && Object.keys(data.data).length > 0) {
@@ -3408,7 +3919,13 @@ export default function HomePage() {
         if (localComparable !== cloudComparable) {
           // 如果数据不一致，无论时间戳如何，都提示用户
           // 用户可以选择使用本地数据覆盖云端，或者使用云端数据覆盖本地
-          setCloudConfigModal({ open: true, userId, type: 'conflict', cloudData: data.data });
+          setCloudConfigModal({
+            open: true,
+            userId,
+            type: 'conflict',
+            cloudData: data.data,
+            updatedAt: data.updated_at
+          });
           return;
         }
 
@@ -3463,23 +3980,92 @@ export default function HomePage() {
 
   const handleSyncLocalConfig = async () => {
     const userId = cloudConfigModal.userId;
-    setCloudConfigModal({ open: false, userId: null });
+    setCloudConfigModal({
+      open: false,
+      userId: null,
+      type: null,
+      cloudData: null,
+      updatedAt: null
+    });
     await syncUserConfig(userId);
+  };
+
+  const handleApplyCloudConflictConfig = async () => {
+    const { cloudData, updatedAt } = cloudConfigModal;
+    setCloudConfigModal({
+      open: false,
+      userId: null,
+      type: null,
+      cloudData: null,
+      updatedAt: null
+    });
+
+    if (!cloudData || typeof cloudData !== 'object') return;
+
+    if (cloudData.version >= 2 && Array.isArray(cloudData.portfolios)) {
+      try {
+        startImportProgress();
+        await applyCloudConfig(cloudData, updatedAt);
+        await finishImportProgress();
+        setSuccessModal({ open: true, message: '已同步云端配置' });
+      } catch (err) {
+        console.error('云端配置应用失败', err);
+        cancelImportProgress();
+        setImportMsg('导入失败，请检查数据');
+        setTimeout(() => setImportMsg(''), 4000);
+      }
+      return;
+    }
+
+    setImportChoiceModal({ open: true, data: cloudData });
+  };
+
+  const handleCloudConflictConfirm = async () => {
+    const action = cloudConflictConfirm.action;
+    setCloudConflictConfirm({ open: false, action: null });
+
+    if (action === 'local') {
+      await handleSyncLocalConfig();
+      return;
+    }
+
+    if (action === 'cloud') {
+      await handleApplyCloudConflictConfig();
+    }
   };
 
   const exportLocalData = async () => {
     try {
-      const payload = {
-        funds: JSON.parse(localStorage.getItem('funds') || '[]'),
-        favorites: JSON.parse(localStorage.getItem('favorites') || '[]'),
-        groups: JSON.parse(localStorage.getItem('groups') || '[]'),
-        collapsedCodes: JSON.parse(localStorage.getItem('collapsedCodes') || '[]'),
-        refreshMs: parseInt(localStorage.getItem('refreshMs') || '30000', 10),
-        viewMode: localStorage.getItem('viewMode') === 'list' ? 'list' : 'card',
-        holdings: JSON.parse(localStorage.getItem('holdings') || '{}'),
-        pendingTrades: JSON.parse(localStorage.getItem('pendingTrades') || '[]'),
-        exportedAt: nowInTz().toISOString()
-      };
+      // 导出 v2 多账本数据结构
+      const userConfigStr = localStorage.getItem('userConfig');
+      let payload;
+      
+      if (userConfigStr) {
+        try {
+          const userConfig = JSON.parse(userConfigStr);
+          if (userConfig && userConfig.version >= 2) {
+            payload = {
+              ...userConfig,
+              exportedAt: nowInTz().toISOString()
+            };
+          }
+        } catch {}
+      }
+      
+      // 如果没有 v2 数据，降级到老格式
+      if (!payload) {
+        payload = {
+          funds: JSON.parse(localStorage.getItem('funds') || '[]'),
+          favorites: JSON.parse(localStorage.getItem('favorites') || '[]'),
+          groups: JSON.parse(localStorage.getItem('groups') || '[]'),
+          refreshMs: parseInt(localStorage.getItem('refreshMs') || '30000', 10),
+          viewMode: localStorage.getItem('viewMode') === 'list' ? 'list' : 'card',
+          holdings: JSON.parse(localStorage.getItem('holdings') || '{}'),
+          pendingTrades: JSON.parse(localStorage.getItem('pendingTrades') || '[]'),
+          exportedAt: nowInTz().toISOString()
+        };
+      }
+      
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       if (window.showSaveFilePicker) {
         const handle = await window.showSaveFilePicker({
@@ -3522,113 +4108,180 @@ export default function HomePage() {
     try {
       const file = e.target.files?.[0];
       if (!file) return;
+      startImportProgress();
+      setSettingsOpen(false);
       const text = await file.text();
       const data = JSON.parse(text);
       if (data && typeof data === 'object') {
-        // 从 localStorage 读取最新数据进行合并，防止状态滞后导致的数据丢失
-        const currentFunds = JSON.parse(localStorage.getItem('funds') || '[]');
-        const currentFavorites = JSON.parse(localStorage.getItem('favorites') || '[]');
-        const currentGroups = JSON.parse(localStorage.getItem('groups') || '[]');
-        const currentCollapsed = JSON.parse(localStorage.getItem('collapsedCodes') || '[]');
-        const currentPendingTrades = JSON.parse(localStorage.getItem('pendingTrades') || '[]');
-
-        let mergedFunds = currentFunds;
-        let appendedCodes = [];
-
-        if (Array.isArray(data.funds)) {
-          const incomingFunds = dedupeByCode(data.funds);
-          const existingCodes = new Set(currentFunds.map(f => f.code));
-          const newItems = incomingFunds.filter(f => f && f.code && !existingCodes.has(f.code));
-          appendedCodes = newItems.map(f => f.code);
-          mergedFunds = [...currentFunds, ...newItems];
-          setFunds(mergedFunds);
-          storageHelper.setItem('funds', JSON.stringify(mergedFunds));
+        // 检查导入数据的版本
+        if (data.version >= 2 && Array.isArray(data.portfolios)) {
+          // v2 数据结构 - 直接合并所有账本
+          await importV2Data(data);
+        } else if (isLegacyData(data)) {
+          // 老数据结构 - 弹出选择弹窗
+          cancelImportProgress();
+          setImportChoiceModal({ open: true, data });
+          if (importFileRef.current) importFileRef.current.value = '';
+          return;
         }
 
-        if (Array.isArray(data.favorites)) {
-          const mergedFav = Array.from(new Set([...currentFavorites, ...data.favorites]));
-          setFavorites(new Set(mergedFav));
-          storageHelper.setItem('favorites', JSON.stringify(mergedFav));
-        }
-
-        if (Array.isArray(data.groups)) {
-          // 合并分组：如果 ID 相同则合并 codes，否则添加新分组
-          const mergedGroups = [...currentGroups];
-          data.groups.forEach(incomingGroup => {
-            const existingIdx = mergedGroups.findIndex(g => g.id === incomingGroup.id);
-            if (existingIdx > -1) {
-              mergedGroups[existingIdx] = {
-                ...mergedGroups[existingIdx],
-                codes: Array.from(new Set([...mergedGroups[existingIdx].codes, ...(incomingGroup.codes || [])]))
-              };
-            } else {
-              mergedGroups.push(incomingGroup);
-            }
-          });
-          setGroups(mergedGroups);
-          storageHelper.setItem('groups', JSON.stringify(mergedGroups));
-        }
-
-        if (Array.isArray(data.collapsedCodes)) {
-          const mergedCollapsed = Array.from(new Set([...currentCollapsed, ...data.collapsedCodes]));
-          setCollapsedCodes(new Set(mergedCollapsed));
-          storageHelper.setItem('collapsedCodes', JSON.stringify(mergedCollapsed));
-        }
-
-        if (typeof data.refreshMs === 'number' && data.refreshMs >= 5000) {
-          setRefreshMs(data.refreshMs);
-          setTempSeconds(Math.round(data.refreshMs / 1000));
-          storageHelper.setItem('refreshMs', String(data.refreshMs));
-        }
-        if (data.viewMode === 'card' || data.viewMode === 'list') {
-          applyViewMode(data.viewMode);
-        }
-
-        if (data.holdings && typeof data.holdings === 'object') {
-          const mergedHoldings = { ...JSON.parse(localStorage.getItem('holdings') || '{}'), ...data.holdings };
-          setHoldings(mergedHoldings);
-          storageHelper.setItem('holdings', JSON.stringify(mergedHoldings));
-        }
-
-        if (Array.isArray(data.pendingTrades)) {
-          const existingPending = Array.isArray(currentPendingTrades) ? currentPendingTrades : [];
-          const incomingPending = data.pendingTrades.filter((trade) => trade && trade.fundCode);
-          const fundCodeSet = new Set(mergedFunds.map((f) => f.code));
-          const keyOf = (trade) => {
-            if (trade?.id) return `id:${trade.id}`;
-            return `k:${trade?.fundCode || ''}:${trade?.type || ''}:${trade?.date || ''}:${trade?.share || ''}:${trade?.amount || ''}:${trade?.isAfter3pm ? 1 : 0}`;
-          };
-          const mergedPendingMap = new Map();
-          existingPending.forEach((trade) => {
-            if (!trade || !fundCodeSet.has(trade.fundCode)) return;
-            mergedPendingMap.set(keyOf(trade), trade);
-          });
-          incomingPending.forEach((trade) => {
-            if (!fundCodeSet.has(trade.fundCode)) return;
-            mergedPendingMap.set(keyOf(trade), trade);
-          });
-          const mergedPending = Array.from(mergedPendingMap.values());
-          setPendingTrades(mergedPending);
-          storageHelper.setItem('pendingTrades', JSON.stringify(mergedPending));
-        }
-
-        // 导入成功后，仅刷新新追加的基金
-        if (appendedCodes.length) {
-          // 这里需要确保 refreshAll 不会因为闭包问题覆盖掉刚刚合并好的 mergedFunds
-          // 我们直接传入所有代码执行一次全量刷新是最稳妥的，或者修改 refreshAll 支持增量更新
-          const allCodes = mergedFunds.map(f => f.code);
-          await refreshAll(allCodes);
-        }
-
+        await finishImportProgress();
         setSuccessModal({ open: true, message: '导入成功' });
-        setSettingsOpen(false); // 导入成功自动关闭设置弹框
+        setSettingsOpen(false);
         if (importFileRef.current) importFileRef.current.value = '';
       }
     } catch (err) {
       console.error('Import error:', err);
+      cancelImportProgress();
       setImportMsg('导入失败，请检查文件格式');
       setTimeout(() => setImportMsg(''), 4000);
       if (importFileRef.current) importFileRef.current.value = '';
+    }
+  };
+
+  // 导入 v2 数据
+  const importV2Data = async (data) => {
+    const validatedData = validateV2Data(data);
+    const cleanedPortfolios = stripHoldingsFromPortfolios(validatedData.portfolios || []);
+    const nextCurrentPortfolioId = validatedData.currentPortfolioId || cleanedPortfolios[0]?.id || currentPortfolioId;
+
+    const newConfig = {
+      version: 2,
+      refreshMs: validatedData.refreshMs,
+      viewMode: validatedData.viewMode,
+      currentPortfolioId: nextCurrentPortfolioId,
+      portfolios: cleanedPortfolios
+    };
+
+    localStorage.setItem('userConfig', JSON.stringify(newConfig));
+    setPortfolios(cleanedPortfolios);
+    if (nextCurrentPortfolioId) {
+      setCurrentPortfolioId(nextCurrentPortfolioId);
+    }
+
+    // 刷新当前账本数据
+    const currentP = cleanedPortfolios.find(p => p.id === nextCurrentPortfolioId) || cleanedPortfolios[0];
+    if (currentP) {
+      const dedupedFunds = sanitizeFunds(currentP.funds || []);
+      setFunds(dedupedFunds);
+      setFavorites(new Set(currentP.favorites || []));
+      setGroups(currentP.groups || []);
+      setHoldings(currentP.holdings || {});
+      setPendingTrades(currentP.pendingTrades || []);
+      
+      localStorage.setItem('funds', JSON.stringify(dedupedFunds));
+      localStorage.setItem('favorites', JSON.stringify(currentP.favorites || []));
+      localStorage.setItem('groups', JSON.stringify(currentP.groups || []));
+      localStorage.setItem('holdings', JSON.stringify(currentP.holdings || {}));
+      localStorage.setItem('pendingTrades', JSON.stringify(currentP.pendingTrades || []));
+      
+      const codes = dedupedFunds.map(f => f.code);
+      if (codes.length) await refreshAll(codes);
+    }
+  };
+
+  // 导入老数据到当前账本
+  const importLegacyToCurrentPortfolio = async (data) => {
+    try {
+      setImportChoiceModal({ open: false, data: null });
+      startImportProgress();
+      const currentP = portfolios.find(p => p.id === currentPortfolioId);
+      if (!currentP) return;
+      
+      const mergedPortfolio = mergeOldDataToPortfolio(currentP, data);
+      const newPortfolios = portfolios.map(p => 
+        p.id === currentPortfolioId ? mergedPortfolio : p
+      );
+      
+      const newConfig = {
+        version: 2,
+        refreshMs,
+        viewMode,
+        currentPortfolioId,
+        portfolios: newPortfolios
+      };
+      
+      localStorage.setItem('userConfig', JSON.stringify(newConfig));
+      setPortfolios(newPortfolios);
+      
+      // 更新当前状态
+      const cleanedFunds = sanitizeFunds(mergedPortfolio.funds || []);
+      setFunds(cleanedFunds);
+      setFavorites(new Set(mergedPortfolio.favorites || []));
+      setGroups(mergedPortfolio.groups || []);
+      setHoldings(mergedPortfolio.holdings || {});
+      setPendingTrades(mergedPortfolio.pendingTrades || []);
+      
+      localStorage.setItem('funds', JSON.stringify(cleanedFunds));
+      localStorage.setItem('favorites', JSON.stringify(mergedPortfolio.favorites || []));
+      localStorage.setItem('groups', JSON.stringify(mergedPortfolio.groups || []));
+      localStorage.setItem('holdings', JSON.stringify(mergedPortfolio.holdings || {}));
+      localStorage.setItem('pendingTrades', JSON.stringify(mergedPortfolio.pendingTrades || []));
+      
+      const codes = cleanedFunds.map(f => f.code);
+      if (codes.length) await refreshAll(codes);
+      
+      await finishImportProgress();
+      setImportChoiceModal({ open: false, data: null });
+      setSuccessModal({ open: true, message: '导入成功' });
+      setSettingsOpen(false);
+    } catch (err) {
+      console.error('Import legacy error:', err);
+      cancelImportProgress();
+      setImportMsg('导入失败，请检查文件格式');
+      setTimeout(() => setImportMsg(''), 4000);
+    }
+  };
+
+  // 导入老数据到新账本
+  const importLegacyToNewPortfolio = async (data, portfolioName = '导入的账本') => {
+    try {
+      setImportChoiceModal({ open: false, data: null });
+      startImportProgress();
+      const v2Data = migrateToV2(data, portfolioName);
+      const newPortfolio = v2Data.portfolios[0];
+      
+      const newPortfolios = [...portfolios, newPortfolio];
+      const newConfig = {
+        version: 2,
+        refreshMs,
+        viewMode,
+        currentPortfolioId: newPortfolio.id,
+        portfolios: newPortfolios
+      };
+      
+      localStorage.setItem('userConfig', JSON.stringify(newConfig));
+      setPortfolios(newPortfolios);
+      setCurrentPortfolioId(newPortfolio.id);
+      
+      // 切换到新账本
+      const cleanedFunds = sanitizeFunds(newPortfolio.funds || []);
+      setFunds(cleanedFunds);
+      setFavorites(new Set(newPortfolio.favorites || []));
+      setGroups(newPortfolio.groups || []);
+      setHoldings(newPortfolio.holdings || {});
+      setPendingTrades(newPortfolio.pendingTrades || []);
+      setCurrentTab('all');
+      
+      localStorage.setItem('funds', JSON.stringify(cleanedFunds));
+      localStorage.setItem('favorites', JSON.stringify(newPortfolio.favorites || []));
+      localStorage.setItem('groups', JSON.stringify(newPortfolio.groups || []));
+      localStorage.setItem('collapsedCodes', JSON.stringify(newPortfolio.collapsedCodes || []));
+      localStorage.setItem('holdings', JSON.stringify(newPortfolio.holdings || {}));
+      localStorage.setItem('pendingTrades', JSON.stringify(newPortfolio.pendingTrades || []));
+      
+      const codes = cleanedFunds.map(f => f.code);
+      if (codes.length) await refreshAll(codes);
+      
+      await finishImportProgress();
+      setImportChoiceModal({ open: false, data: null });
+      setSuccessModal({ open: true, message: `已创建新账本"${portfolioName}"并导入数据` });
+      setSettingsOpen(false);
+    } catch (err) {
+      console.error('Import legacy error:', err);
+      cancelImportProgress();
+      setImportMsg('导入失败，请检查文件格式');
+      setTimeout(() => setImportMsg(''), 4000);
     }
   };
 
@@ -3646,20 +4299,32 @@ export default function HomePage() {
       holdingModal.open ||
       actionModal.open ||
       tradeModal.open ||
+      topHoldingsModal.open ||
       !!clearConfirm ||
       donateOpen ||
       !!fundDeleteConfirm ||
       updateModalOpen ||
-      weChatOpen;
+      weChatOpen ||
+      portfolioModalOpen ||
+      importChoiceModal.open ||
+      newPortfolioModal.open ||
+      !!deletePortfolioConfirm;
+
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
 
     if (isAnyModalOpen) {
       document.body.style.overflow = 'hidden';
+      if (scrollbarWidth > 0) {
+        document.body.style.paddingRight = `${scrollbarWidth}px`;
+      }
     } else {
       document.body.style.overflow = '';
+      document.body.style.paddingRight = '';
     }
 
     return () => {
       document.body.style.overflow = '';
+      document.body.style.paddingRight = '';
     };
   }, [
     settingsOpen,
@@ -3674,10 +4339,15 @@ export default function HomePage() {
     holdingModal.open,
     actionModal.open,
     tradeModal.open,
+    topHoldingsModal.open,
     clearConfirm,
     donateOpen,
     updateModalOpen,
-    weChatOpen
+    weChatOpen,
+    portfolioModalOpen,
+    importChoiceModal.open,
+    newPortfolioModal.open,
+    deletePortfolioConfirm
   ]);
 
   useEffect(() => {
@@ -3698,6 +4368,46 @@ export default function HomePage() {
   return (
     <div className="container content">
       <Announcement />
+      {isImporting && (
+        <div className="modal-overlay" role="status" aria-live="polite" style={{ zIndex: 10005 }}>
+          <div className="glass card modal" style={{ maxWidth: 360 }}>
+            <div className="title" style={{ marginBottom: 12 }}>
+              <span>正在导入配置</span>
+            </div>
+            <div className="row" style={{ gap: 12, alignItems: 'center' }}>
+              <svg width="86" height="86" viewBox="0 0 86 86" aria-label="导入进度">
+                <circle
+                  cx="43"
+                  cy="43"
+                  r={importCircleRadius}
+                  stroke="rgba(255,255,255,0.12)"
+                  strokeWidth="6"
+                  fill="none"
+                />
+                <circle
+                  cx="43"
+                  cy="43"
+                  r={importCircleRadius}
+                  stroke="var(--accent)"
+                  strokeWidth="6"
+                  strokeLinecap="round"
+                  fill="none"
+                  strokeDasharray={importCircleCircumference}
+                  strokeDashoffset={importCircleOffset}
+                  transform="rotate(-90 43 43)"
+                />
+                <text x="43" y="47" textAnchor="middle" fontSize="14" fill="var(--text)">
+                  {Math.round(importProgress)}%
+                </text>
+              </svg>
+              <div>
+                <div style={{ fontWeight: 600 }}>导入处理中</div>
+                <div className="muted" style={{ marginTop: 4 }}>请稍候，不要关闭页面</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="navbar glass">
         {refreshing && <div className="loading-bar"></div>}
         <div className="brand">
@@ -3747,7 +4457,6 @@ export default function HomePage() {
               <UpdateIcon width="14" height="14" />
             </div>
           )}
-          <img alt="项目Github地址" src={githubImg.src} style={{ width: '30px', height: '30px', cursor: 'pointer' }} onClick={() => window.open("https://github.com/hzm0321/real-time-fund")} />
           <div className="badge" title="当前刷新频率">
             <span>刷新</span>
             <strong>{Math.round(refreshMs / 1000)}秒</strong>
@@ -3968,6 +4677,119 @@ export default function HomePage() {
         </div>
 
         <div className="col-12">
+          {/* 账本选择器 */}
+          <div className="portfolio-selector" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div 
+              className="portfolio-dropdown-wrapper" 
+              ref={portfolioDropdownRef}
+              style={{ position: 'relative' }}
+            >
+              <button
+                className="portfolio-selector-btn glass"
+                onClick={() => setPortfolioDropdownOpen(!portfolioDropdownOpen)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  border: '1px solid var(--border)',
+                  background: 'rgba(255,255,255,0.05)',
+                  cursor: 'pointer',
+                  fontSize: 14,
+                  color: 'var(--text)'
+                }}
+              >
+                <span style={{ fontSize: 16 }}>📚</span>
+                <span>{currentPortfolio?.name || '默认账本'}</span>
+                <ChevronIcon 
+                  width="14" 
+                  height="14" 
+                  style={{ 
+                    transform: portfolioDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                    transition: 'transform 0.2s'
+                  }} 
+                />
+              </button>
+              
+              <AnimatePresence>
+                {portfolioDropdownOpen && (
+                  <motion.div
+                    className="portfolio-dropdown glass"
+                    initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                    transition={{ duration: 0.15 }}
+                    style={{
+                      position: 'absolute',
+                      top: '100%',
+                      left: 0,
+                      marginTop: 4,
+                      minWidth: 200,
+                      borderRadius: 8,
+                      border: '1px solid var(--border)',
+                      background: 'rgba(20, 30, 40, 0.95)',
+                      backdropFilter: 'blur(20px)',
+                      zIndex: 100,
+                      overflow: 'hidden'
+                    }}
+                  >
+                    <div className="portfolio-list" style={{ maxHeight: 300, overflowY: 'auto' }}>
+                      {portfolios.map(p => (
+                        <button
+                          key={p.id}
+                          className={`portfolio-item ${p.id === currentPortfolioId ? 'active' : ''}`}
+                          onClick={() => {
+                            switchPortfolio(p.id);
+                            setPortfolioDropdownOpen(false);
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            width: '100%',
+                            padding: '10px 12px',
+                            border: 'none',
+                            background: p.id === currentPortfolioId ? 'rgba(var(--primary-rgb), 0.15)' : 'transparent',
+                            cursor: 'pointer',
+                            fontSize: 14,
+                            color: p.id === currentPortfolioId ? 'var(--primary)' : 'var(--text)',
+                            textAlign: 'left'
+                          }}
+                        >
+                          <span style={{ fontSize: 14 }}>📚</span>
+                          <span style={{ flex: 1 }}>{p.name}</span>
+                          <span className="muted" style={{ fontSize: 12 }}>
+                            {(p.funds || []).length}支
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+            <button
+              className="icon-button portfolio-manage-icon"
+              onClick={() => setPortfolioModalOpen(true)}
+              title="管理账本"
+              style={{
+                width: 38,
+                height: 38,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: 12,
+                border: '1px solid rgba(var(--primary-rgb), 0.55)',
+                background: 'linear-gradient(135deg, rgba(var(--primary-rgb), 0.28), rgba(var(--primary-rgb), 0.08))',
+                color: 'var(--primary)',
+                boxShadow: '0 8px 18px rgba(var(--primary-rgb), 0.22)'
+              }}
+            >
+              <SettingsIcon width="20" height="20" />
+            </button>
+          </div>
+
           <div className="filter-bar" style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
             <div className="tabs-container">
               <div
@@ -4616,57 +5438,20 @@ export default function HomePage() {
                                   </div>
                                 )}
                                 <div
-                                  style={{ marginBottom: 8, cursor: 'pointer', userSelect: 'none' }}
+                                  style={{ marginBottom: 8 }}
                                   className="title"
-                                  onClick={() => toggleCollapse(f.code)}
                                 >
-                                  <div className="row" style={{ width: '100%', flex: 1 }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                      <span>前10重仓股票</span>
-                                      <ChevronIcon
-                                        width="16"
-                                        height="16"
-                                        className="muted"
-                                        style={{
-                                          transform: collapsedCodes.has(f.code) ? 'rotate(-90deg)' : 'rotate(0deg)',
-                                          transition: 'transform 0.2s ease'
-                                        }}
-                                      />
-                                    </div>
-                                    <span className="muted">涨跌幅 / 占比</span>
+                                  <div className="row" style={{ width: '100%', flex: 1, alignItems: 'center', justifyContent: 'flex-end' }}>
+                                    <button
+                                      type="button"
+                                      className="button"
+                                      onClick={() => openTopHoldingsModal(f)}
+                                      style={{ padding: '6px 12px', fontSize: 12, border: 'none', background: 'var(--primary)', color: '#05263b', boxShadow: '0 10px 18px rgba(var(--primary-rgb), 0.25)' }}
+                                    >
+                                      前10重仓股票
+                                    </button>
                                   </div>
                                 </div>
-                                <AnimatePresence>
-                                  {!collapsedCodes.has(f.code) && (
-                                    <motion.div
-                                      initial={{ height: 0, opacity: 0 }}
-                                      animate={{ height: 'auto', opacity: 1 }}
-                                      exit={{ height: 0, opacity: 0 }}
-                                      transition={{ duration: 0.3, ease: 'easeInOut' }}
-                                      style={{ overflow: 'hidden' }}
-                                    >
-                                      {Array.isArray(f.holdings) && f.holdings.length ? (
-                                        <div className="list">
-                                          {f.holdings.map((h, idx) => (
-                                            <div className="item" key={idx}>
-                                              <span className="name">{h.name}</span>
-                                              <div className="values">
-                                                {typeof h.change === 'number' && (
-                                                  <span className={`badge ${h.change > 0 ? 'up' : h.change < 0 ? 'down' : ''}`} style={{ marginRight: 8 }}>
-                                                    {h.change > 0 ? '+' : ''}{h.change.toFixed(2)}%
-                                                  </span>
-                                                )}
-                                                <span className="weight">{h.weight}</span>
-                                              </div>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      ) : (
-                                        <div className="muted" style={{ padding: '8px 0' }}>暂无重仓数据</div>
-                                      )}
-                                    </motion.div>
-                                  )}
-                                </AnimatePresence>
                               </>
                             )}
                           </motion.div>
@@ -4680,6 +5465,19 @@ export default function HomePage() {
           )}
         </div>
       </div>
+
+      <AnimatePresence>
+        {topHoldingsModal.open && (
+          <TopHoldingsModal
+            fund={topHoldingsModal.fund}
+            items={topHoldingsModal.items}
+            loading={topHoldingsModal.loading}
+            error={topHoldingsModal.error}
+            onClose={closeTopHoldingsModal}
+            onRetry={() => openTopHoldingsModal(topHoldingsModal.fund)}
+          />
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {fundDeleteConfirm && (
@@ -4714,48 +5512,6 @@ export default function HomePage() {
       <div className="footer">
         <p style={{ marginBottom: 8 }}>数据源：实时估值与重仓直连东方财富，仅供个人学习及参考使用。数据可能存在延迟，不作为任何投资建议</p>
         <p style={{ marginBottom: 12 }}>注：估算数据与真实结算数据会有1%左右误差，非股票型基金误差较大</p>
-        <div style={{ marginTop: 12, opacity: 0.8, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-          <p style={{ margin: 0 }}>
-            遇到任何问题或需求建议可
-            <button
-              className="link-button"
-              onClick={() => {
-                setFeedbackNonce((n) => n + 1);
-                setFeedbackOpen(true);
-              }}
-              style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: '0 4px', textDecoration: 'underline', fontSize: 'inherit', fontWeight: 600 }}
-            >
-              点此提交反馈
-            </button>
-          </p>
-          <button
-            onClick={() => setDonateOpen(true)}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--muted)',
-              fontSize: '12px',
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              padding: '4px 8px',
-              borderRadius: '6px',
-              transition: 'all 0.2s ease'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = 'var(--primary)';
-              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = 'var(--muted)';
-              e.currentTarget.style.background = 'transparent';
-            }}
-          >
-            <span>☕</span>
-            <span>点此请作者喝杯咖啡</span>
-          </button>
-        </div>
       </div>
 
       <AnimatePresence>
@@ -4898,6 +5654,349 @@ export default function HomePage() {
         )}
       </AnimatePresence>
 
+      {/* 账本管理弹窗 */}
+      <AnimatePresence>
+        {portfolioModalOpen && (
+          <motion.div
+            className="modal-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-label="账本管理"
+            onClick={() => setPortfolioModalOpen(false)}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="glass card modal"
+              onClick={(e) => e.stopPropagation()}
+              style={{ maxWidth: 400 }}
+            >
+              <div className="title" style={{ marginBottom: 20, justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 20 }}>📚</span>
+                  <span>账本管理</span>
+                  <span className="muted" style={{ fontSize: 14, fontWeight: 600 }}>({portfolios.length})</span>
+                </div>
+                <button className="icon-button" onClick={() => setPortfolioModalOpen(false)} style={{ border: 'none', background: 'transparent' }}>
+                  <CloseIcon width="20" height="20" />
+                </button>
+              </div>
+
+              <div className="portfolio-list" style={{ maxHeight: 300, overflowY: 'auto', marginBottom: 16 }}>
+                {portfolios.map((p, idx) => (
+                  <div
+                    key={p.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '12px',
+                      borderRadius: 8,
+                      background: p.id === currentPortfolioId ? 'rgba(var(--primary-rgb), 0.1)' : 'transparent',
+                      marginBottom: 8
+                    }}
+                  >
+                    <span style={{ fontSize: 16 }}>📚</span>
+                    {editingPortfolio === p.id ? (
+                      <input
+                        className="input"
+                        type="text"
+                        defaultValue={p.name}
+                        autoFocus
+                        onBlur={(e) => {
+                          const newName = e.target.value.trim();
+                          if (newName && newName !== p.name) {
+                            renamePortfolio(p.id, newName);
+                          }
+                          setEditingPortfolio(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const newName = e.target.value.trim();
+                            if (newName && newName !== p.name) {
+                              renamePortfolio(p.id, newName);
+                            }
+                            setEditingPortfolio(null);
+                          } else if (e.key === 'Escape') {
+                            setEditingPortfolio(null);
+                          }
+                        }}
+                        style={{ flex: 1, padding: '4px 8px', fontSize: 14 }}
+                      />
+                    ) : (
+                      <span style={{ flex: 1, fontSize: 14 }}>{p.name}</span>
+                    )}
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      {(p.funds || []).length}支
+                    </span>
+                    <button
+                      className="icon-button"
+                      onClick={() => setEditingPortfolio(p.id)}
+                      title="重命名"
+                      style={{ padding: 4 }}
+                    >
+                      <SettingsIcon width="14" height="14" />
+                    </button>
+                    {portfolios.length > 1 && (
+                      <button
+                        className="icon-button"
+                        onClick={() => setDeletePortfolioConfirm({ id: p.id, name: p.name })}
+                        title="删除"
+                        style={{ padding: 4, color: 'var(--danger)' }}
+                      >
+                        <TrashIcon width="14" height="14" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <button
+                className="button"
+                onClick={() => {
+                  setNewPortfolioName('新账本');
+                  setNewPortfolioModal({ 
+                    open: true, 
+                    callback: (name) => {
+                      addPortfolio(name);
+                    }
+                  });
+                }}
+                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              >
+                <PlusIcon width="16" height="16" />
+                <span>新建账本</span>
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 导入选择弹窗 */}
+      <AnimatePresence>
+        {importChoiceModal.open && (
+          <motion.div
+            className="modal-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-label="导入选择"
+            onClick={() => setImportChoiceModal({ open: false, data: null })}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="glass card modal"
+              onClick={(e) => e.stopPropagation()}
+              style={{ maxWidth: 400 }}
+            >
+              <div className="title" style={{ marginBottom: 20, justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 20 }}>📥</span>
+                  <span>检测到旧版数据</span>
+                </div>
+                <button 
+                  className="icon-button" 
+                  onClick={() => setImportChoiceModal({ open: false, data: null })} 
+                  style={{ border: 'none', background: 'transparent' }}
+                >
+                  <CloseIcon width="20" height="20" />
+                </button>
+              </div>
+
+              <p className="muted" style={{ marginBottom: 20, fontSize: 14, lineHeight: 1.6 }}>
+                检测到导入的数据为旧版格式，请选择导入方式：
+              </p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <button
+                  className="button"
+                  onClick={() => importLegacyToCurrentPortfolio(importChoiceModal.data)}
+                  style={{ width: '100%' }}
+                >
+                  导入到当前账本「{currentPortfolio?.name || '默认账本'}」
+                </button>
+                <button
+                  className="button secondary"
+                  onClick={() => {
+                    setNewPortfolioName('导入的账本');
+                    setNewPortfolioModal({
+                      open: true,
+                      callback: (name) => {
+                        importLegacyToNewPortfolio(importChoiceModal.data, name);
+                      }
+                    });
+                  }}
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.1)' }}
+                >
+                  新建账本并导入
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 新建账本弹窗 */}
+      <AnimatePresence>
+        {newPortfolioModal.open && (
+          <motion.div
+            className="modal-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-label="新建账本"
+            onClick={() => setNewPortfolioModal({ open: false, callback: null })}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="glass card modal"
+              onClick={(e) => e.stopPropagation()}
+              style={{ maxWidth: 360 }}
+            >
+              <div className="title" style={{ marginBottom: 20, justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <PlusIcon width="20" height="20" />
+                  <span>新建账本</span>
+                </div>
+                <button 
+                  className="icon-button" 
+                  onClick={() => setNewPortfolioModal({ open: false, callback: null })} 
+                  style={{ border: 'none', background: 'transparent' }}
+                >
+                  <CloseIcon width="20" height="20" />
+                </button>
+              </div>
+
+              <form onSubmit={(e) => {
+                e.preventDefault();
+                const name = newPortfolioName.trim();
+                if (name && newPortfolioModal.callback) {
+                  newPortfolioModal.callback(name);
+                }
+                setNewPortfolioModal({ open: false, callback: null });
+                setNewPortfolioName('');
+              }}>
+                <div className="form-group" style={{ marginBottom: 20 }}>
+                  <label className="muted" style={{ display: 'block', marginBottom: 8, fontSize: 14 }}>
+                    账本名称
+                  </label>
+                  <input
+                    className="input"
+                    type="text"
+                    ref={newPortfolioInputRef}
+                    value={newPortfolioName}
+                    onChange={(e) => setNewPortfolioName(e.target.value)}
+                    placeholder="请输入账本名称"
+                    autoFocus
+                    style={{ width: '100%' }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <button
+                    type="button"
+                    className="button secondary"
+                    onClick={() => {
+                      setNewPortfolioModal({ open: false, callback: null });
+                      setNewPortfolioName('');
+                    }}
+                    style={{ flex: 1, background: 'rgba(255,255,255,0.1)' }}
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="submit"
+                    className="button"
+                    disabled={!newPortfolioName.trim()}
+                    style={{ flex: 1 }}
+                  >
+                    确定
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 删除账本确认弹窗 */}
+      <AnimatePresence>
+        {deletePortfolioConfirm && (
+          <motion.div
+            className="modal-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-label="删除账本确认"
+            onClick={() => setDeletePortfolioConfirm(null)}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="glass card modal"
+              onClick={(e) => e.stopPropagation()}
+              style={{ maxWidth: 360 }}
+            >
+              <div className="title" style={{ marginBottom: 20, justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <TrashIcon width="20" height="20" style={{ color: 'var(--danger)' }} />
+                  <span>删除账本</span>
+                </div>
+                <button 
+                  className="icon-button" 
+                  onClick={() => setDeletePortfolioConfirm(null)} 
+                  style={{ border: 'none', background: 'transparent' }}
+                >
+                  <CloseIcon width="20" height="20" />
+                </button>
+              </div>
+
+              <p style={{ marginBottom: 8, fontSize: 14, lineHeight: 1.6 }}>
+                确定要删除账本 <strong style={{ color: 'var(--primary)' }}>「{deletePortfolioConfirm.name}」</strong> 吗？
+              </p>
+              <p className="muted" style={{ marginBottom: 20, fontSize: 13, lineHeight: 1.5 }}>
+                删除后该账本下的所有基金、持仓、分组等数据将被清除，此操作不可恢复。
+              </p>
+
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button
+                  className="button secondary"
+                  onClick={() => setDeletePortfolioConfirm(null)}
+                  style={{ flex: 1, background: 'rgba(255,255,255,0.1)' }}
+                >
+                  取消
+                </button>
+                <button
+                  className="button"
+                  onClick={() => {
+                    deletePortfolio(deletePortfolioConfirm.id);
+                    setDeletePortfolioConfirm(null);
+                  }}
+                  style={{ flex: 1, background: 'var(--danger)' }}
+                >
+                  确认删除
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {successModal.open && (
           <SuccessModal
@@ -4911,13 +6010,40 @@ export default function HomePage() {
         {cloudConfigModal.open && (
           <CloudConfigModal
             type={cloudConfigModal.type}
-            onConfirm={handleSyncLocalConfig}
+            onConfirm={() => {
+              if (cloudConfigModal.type === 'conflict') {
+                setCloudConflictConfirm({ open: true, action: 'local' });
+                return;
+              }
+              handleSyncLocalConfig();
+            }}
             onCancel={() => {
-              if (cloudConfigModal.type === 'conflict' && cloudConfigModal.cloudData) {
-                applyCloudConfig(cloudConfigModal.cloudData);
+              if (cloudConfigModal.type === 'conflict') {
+                setCloudConflictConfirm({ open: true, action: 'cloud' });
+                return;
               }
               setCloudConfigModal({ open: false, userId: null });
             }}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {cloudConflictConfirm.open && (
+          <ConfirmModal
+            title="二次确认"
+            message={cloudConflictConfirm.action === 'local' ? (
+              <>
+                确定使用<strong style={{ color: 'var(--primary)' }}>本地</strong>配置覆盖<strong style={{ color: 'var(--accent)' }}>云端</strong>吗？<strong style={{ color: 'var(--danger)' }}>此操作将替换云端数据。</strong>
+              </>
+            ) : (
+              <>
+                确定使用<strong style={{ color: 'var(--accent)' }}>云端</strong>配置覆盖<strong style={{ color: 'var(--primary)' }}>本地</strong>吗？<strong style={{ color: 'var(--danger)' }}>本地配置将被替换。</strong>
+              </>
+            )}
+            confirmText="确认"
+            onConfirm={handleCloudConflictConfirm}
+            onCancel={() => setCloudConflictConfirm({ open: false, action: null })}
           />
         )}
       </AnimatePresence>
@@ -4969,7 +6095,15 @@ export default function HomePage() {
               </div>
               <div className="muted" style={{ marginBottom: 8, fontSize: '0.8rem', marginTop: 26 }}>数据导入</div>
               <div className="row" style={{ gap: 8, marginTop: 8 }}>
-                <button type="button" className="button" onClick={() => importFileRef.current?.click?.()}>导入配置</button>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => importFileRef.current?.click?.()}
+                  disabled={isImporting}
+                  aria-busy={isImporting}
+                >
+                  {isImporting ? '正在导入...' : '导入配置'}
+                </button>
               </div>
               <input
                 ref={importFileRef}
@@ -4978,6 +6112,39 @@ export default function HomePage() {
                 style={{ display: 'none' }}
                 onChange={handleImportFileChange}
               />
+              {isImporting && (
+                <div className="row" style={{ gap: 12, alignItems: 'center', marginTop: 12 }}>
+                  <svg width="86" height="86" viewBox="0 0 86 86" aria-label="导入进度">
+                    <circle
+                      cx="43"
+                      cy="43"
+                      r={importCircleRadius}
+                      stroke="rgba(255,255,255,0.12)"
+                      strokeWidth="6"
+                      fill="none"
+                    />
+                    <circle
+                      cx="43"
+                      cy="43"
+                      r={importCircleRadius}
+                      stroke="var(--accent)"
+                      strokeWidth="6"
+                      strokeLinecap="round"
+                      fill="none"
+                      strokeDasharray={importCircleCircumference}
+                      strokeDashoffset={importCircleOffset}
+                      transform="rotate(-90 43 43)"
+                    />
+                    <text x="43" y="47" textAnchor="middle" fontSize="14" fill="var(--text)">
+                      {Math.round(importProgress)}%
+                    </text>
+                  </svg>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>正在导入配置</div>
+                    <div className="muted" style={{ marginTop: 4 }}>请稍候，不要关闭页面</div>
+                  </div>
+                </div>
+              )}
               {importMsg && (
                 <div className="muted" style={{ marginTop: 8 }}>
                   {importMsg}
@@ -5094,7 +6261,7 @@ export default function HomePage() {
                   color: '#e6a23c',
                   lineHeight: '1.4'
                 }}>
-                  ⚠️ 登录功能目前正在测试，使用过程中如遇到问题欢迎大家在 <a href="https://github.com/hzm0321/real-time-fund/issues" target="_blank" style={{ textDecoration: 'underline', color: 'inherit' }}>Github</a> 上反馈
+                  ⚠️ 登录功能目前正在测试
                 </div>
                 <div className="muted" style={{ marginBottom: 8, fontSize: '0.8rem' }}>
                   请输入邮箱，我们将发送验证码到您的邮箱
