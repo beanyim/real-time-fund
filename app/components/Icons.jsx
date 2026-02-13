@@ -85,6 +85,44 @@ export function ChevronIcon(props) {
   );
 }
 
+export function ArrowUpIcon(props) {
+  return (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+      <line x1="12" y1="19" x2="12" y2="5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <polyline points="6 11 12 5 18 11" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function ArrowDownIcon(props) {
+  return (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+      <line x1="12" y1="5" x2="12" y2="19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <polyline points="6 13 12 19 18 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function MoveTopIcon(props) {
+  return (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+      <line x1="4" y1="5" x2="20" y2="5" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+      <line x1="12" y1="19" x2="12" y2="7" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+      <polyline points="6 11 12 5 18 11" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function MoveBottomIcon(props) {
+  return (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+      <line x1="4" y1="19" x2="20" y2="19" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+      <line x1="12" y1="5" x2="12" y2="17" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+      <polyline points="6 13 12 19 18 13" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function SortIcon(props) {
   return (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">

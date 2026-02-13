@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const ANNOUNCEMENT_KEY = 'hasClosedAnnouncement_v6';
+const ANNOUNCEMENT_KEY = 'hasClosedAnnouncement_v7';
 
 export default function Announcement() {
   const [isVisible, setIsVisible] = useState(false);
@@ -64,7 +64,7 @@ export default function Announcement() {
             </div>
             
             <div style={{ color: 'var(--text)', lineHeight: '1.6', fontSize: '15px' }}>
-              新增多账本管理与数据迁移，支持切换/新建/重命名/删除账本；基金详情新增前10重仓股票弹窗；优化云端同步与滚动条视觉效果。
+              默认排序模式下新增手动排序功能，且支持置顶和置底。
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>

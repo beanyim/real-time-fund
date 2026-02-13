@@ -445,6 +445,29 @@ input[type="number"] {
   transform: translateY(0);
 }
 
+.sort-config-btn {
+  transition: color 0.2s ease;
+  transform: none;
+  color: var(--muted);
+}
+
+.sort-config-btn.active {
+  color: #f8fafc;
+}
+
+.sort-config-btn.active:hover {
+  color: #0b1220;
+}
+
+.sort-config-btn:hover {
+  color: var(--accent);
+  transform: none;
+}
+
+.sort-config-btn:active {
+  transform: none;
+}
+
 .sticky-toggle-btn {
   display: none !important;
 }
@@ -822,6 +845,40 @@ input[type="number"] {
 }
 .chip:hover { transform: translateY(-1px); border-color: var(--accent); }
 .chip.active { background: linear-gradient(180deg, #0ea5e9, #22d3ee); color: #05263b; border-color: transparent; }
+
+.default-chip {
+  position: relative;
+  padding-right: 18px;
+}
+
+.sort-config-badge {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.45);
+  color: #0b1220;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.25);
+  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  cursor: pointer;
+}
+
+.default-chip.active .sort-config-badge {
+  background: #22d3ee;
+  color: #05263b;
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.35), 0 6px 14px rgba(15, 23, 42, 0.3);
+}
+
+.sort-config-badge:hover {
+  transform: scale(1.08);
+  background: #ffffff;
+  color: #0f172a;
+}
 
 @keyframes spin {
   from { transform: rotate(0deg); }

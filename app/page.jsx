@@ -9,7 +9,7 @@ import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import Announcement from "./components/Announcement";
 import { DatePicker, DonateTabs, NumericInput, Stat } from "./components/Common";
-import { ChevronIcon, CloseIcon, CloudIcon, DragIcon, ExitIcon, EyeIcon, EyeOffIcon, GridIcon, ListIcon, LoginIcon, LogoutIcon, MailIcon, PinIcon, PinOffIcon, PlusIcon, RefreshIcon, SettingsIcon, SortIcon, StarIcon, TrashIcon, UpdateIcon, UserIcon } from "./components/Icons";
+import { ArrowDownIcon, ArrowUpIcon, ChevronIcon, CloseIcon, CloudIcon, DragIcon, ExitIcon, EyeIcon, EyeOffIcon, GridIcon, ListIcon, LoginIcon, LogoutIcon, MailIcon, MoveBottomIcon, MoveTopIcon, PinIcon, PinOffIcon, PlusIcon, RefreshIcon, SettingsIcon, SortIcon, StarIcon, TrashIcon, UpdateIcon, UserIcon } from "./components/Icons";
 import githubImg from "./assets/github.svg";
 import weChatGroupImg from "./assets/weChatGroup.png";
 import { supabase, isSupabaseConfigured } from './lib/supabase';
@@ -1420,6 +1420,150 @@ function ConfirmModal({ title, message, onConfirm, onCancel, confirmText = "确�
   );
 }
 
+function SortManageModal({ funds, onClose, onSave }) {
+  const [items, setItems] = useState(funds);
+
+  useEffect(() => {
+    setItems(funds);
+  }, [funds]);
+
+  useEffect(() => {
+    const { overflow, paddingRight } = document.body.style;
+    const scrollBarWidth = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.overflow = 'hidden';
+    if (scrollBarWidth > 0) {
+      document.body.style.paddingRight = `${scrollBarWidth}px`;
+    }
+    return () => {
+      document.body.style.overflow = overflow;
+      document.body.style.paddingRight = paddingRight;
+    };
+  }, []);
+
+  const moveToTop = (code) => {
+    setItems(prev => {
+      const index = prev.findIndex(item => item.code === code);
+      if (index <= 0) return prev;
+      const target = prev[index];
+      const next = [target, ...prev.filter((_, idx) => idx !== index)];
+      return next;
+    });
+  };
+
+  const moveToBottom = (code) => {
+    setItems(prev => {
+      const index = prev.findIndex(item => item.code === code);
+      if (index === -1 || index === prev.length - 1) return prev;
+      const target = prev[index];
+      const next = [...prev.filter((_, idx) => idx !== index), target];
+      return next;
+    });
+  };
+
+  const handleConfirm = () => {
+    onSave(items);
+    onClose();
+  };
+
+  return (
+    <motion.div
+      className="modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="编辑默认排序"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 20 }}
+        className="glass card modal"
+        style={{ maxWidth: '520px', width: '92vw' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="title" style={{ marginBottom: 16, justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <SortIcon width="20" height="20" />
+            <span>默认排序管理</span>
+          </div>
+          <button className="icon-button" onClick={onClose} style={{ border: 'none', background: 'transparent' }}>
+            <CloseIcon width="20" height="20" />
+          </button>
+        </div>
+
+        <div className="muted" style={{ fontSize: '12px', marginBottom: 12 }}>
+          拖拽调整顺序，保存后在“默认”排序下生效。
+        </div>
+
+        <div style={{ maxHeight: '60vh', overflowY: 'auto', paddingRight: 6 }}>
+          <Reorder.Group axis="y" values={items} onReorder={setItems} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <AnimatePresence mode="popLayout">
+              {items.map((item) => (
+                <Reorder.Item
+                  key={item.code}
+                  value={item}
+                  className="glass"
+                  layout
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.98 }}
+                  transition={{ type: 'spring', stiffness: 500, damping: 35, mass: 1, layout: { duration: 0.2 } }}
+                  style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 10 }}
+                >
+                  <div style={{ cursor: 'grab', display: 'flex', alignItems: 'center' }}>
+                    <DragIcon width="16" height="16" className="muted" />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
+                    <span style={{ fontSize: 14, fontWeight: 600 }}>{item.name || '未知基金'}</span>
+                    <span className="muted" style={{ fontSize: 12 }}>#{item.code}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        moveToTop(item.code);
+                      }}
+                      title="置顶"
+                      style={{ width: 28, height: 28, borderRadius: 8 }}
+                    >
+                      <MoveTopIcon width="14" height="14" />
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        moveToBottom(item.code);
+                      }}
+                      title="置底"
+                      style={{ width: 28, height: 28, borderRadius: 8 }}
+                    >
+                      <MoveBottomIcon width="14" height="14" />
+                    </button>
+                  </div>
+                </Reorder.Item>
+              ))}
+            </AnimatePresence>
+          </Reorder.Group>
+        </div>
+
+        <div className="row" style={{ marginTop: 20, gap: 12 }}>
+          <button className="button secondary" onClick={onClose} style={{ flex: 1, background: 'rgba(255,255,255,0.05)', color: 'var(--text)' }}>
+            取消
+          </button>
+          <button className="button" onClick={handleConfirm} style={{ flex: 1 }}>
+            保存排序
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 function GroupManageModal({ groups, onClose, onSave }) {
   const [items, setItems] = useState(groups);
   const [deleteConfirm, setDeleteConfirm] = useState(null); // { id, name }
@@ -1971,6 +2115,9 @@ export default function HomePage() {
   // 排序状态
   const [sortBy, setSortBy] = useState('default'); // default, name, yield, holding
   const [sortOrder, setSortOrder] = useState('desc'); // asc | desc
+  const [sortManageOpen, setSortManageOpen] = useState(false);
+  const [sortBadgeHover, setSortBadgeHover] = useState(false);
+  const [defaultChipHover, setDefaultChipHover] = useState(false);
 
   // 视图模式
   const [viewMode, setViewMode] = useState('card'); // card, list
@@ -2341,6 +2488,12 @@ export default function HomePage() {
   };
 
 
+  const hasValidOrder = (value) => typeof value === 'number' && Number.isFinite(value);
+
+  const getFundOrderValue = (fund, fallback = Number.MAX_SAFE_INTEGER) => {
+    return hasValidOrder(fund?.order) ? fund.order : fallback;
+  };
+
   // 过滤和排序后的基金列表
   const displayFunds = funds
     .filter(f => {
@@ -2350,6 +2503,9 @@ export default function HomePage() {
       return group ? group.codes.includes(f.code) : true;
     })
     .sort((a, b) => {
+      if (sortBy === 'default') {
+        return getFundOrderValue(a) - getFundOrderValue(b);
+      }
       if (sortBy === 'yield') {
         const valA = typeof a.estGszzl === 'number' ? a.estGszzl : (Number(a.gszzl) || 0);
         const valB = typeof b.estGszzl === 'number' ? b.estGszzl : (Number(b.gszzl) || 0);
@@ -2367,6 +2523,11 @@ export default function HomePage() {
       }
       return 0;
     });
+
+  const defaultOrderFunds = useMemo(() => {
+    return [...funds].sort((a, b) => getFundOrderValue(a) - getFundOrderValue(b));
+  }, [funds]);
+
 
   // 自动滚动选中 Tab 到可视区域
   useEffect(() => {
@@ -2621,8 +2782,13 @@ export default function HomePage() {
     try {
       const list = JSON.parse(value || '[]');
       if (!Array.isArray(list)) return '';
-      const codes = list.map((item) => item?.code).filter(Boolean);
-      return Array.from(new Set(codes)).sort().join('|');
+      const codes = list.map((item) => {
+        const code = item?.code;
+        if (!code) return '';
+        const orderValue = typeof item?.order === 'number' && Number.isFinite(item.order) ? item.order : '';
+        return `${code}:${orderValue}`;
+      }).filter(Boolean);
+      return codes.join('|');
     } catch (e) {
       return '';
     }
@@ -2721,6 +2887,21 @@ export default function HomePage() {
       }
     };
   }, [getFundCodesSignature, scheduleSync]);
+
+  const handleSaveSortOrder = useCallback((nextItems) => {
+    if (!Array.isArray(nextItems)) return;
+    const orderMap = new Map(nextItems.map((item, index) => [item.code, index]));
+    setFunds(prev => {
+      const next = prev.map((fund) => {
+        if (!fund?.code) return fund;
+        const nextOrder = orderMap.has(fund.code) ? orderMap.get(fund.code) : getFundOrderValue(fund);
+        return { ...fund, order: nextOrder };
+      });
+      storageHelper.setItem('funds', JSON.stringify(next));
+      updateCurrentPortfolio({ funds: next });
+      return next;
+    });
+  }, [storageHelper, updateCurrentPortfolio]);
 
   useEffect(() => {
     const keys = new Set(['funds', 'favorites', 'groups', 'refreshMs', 'holdings', 'pendingTrades', 'viewMode']);
@@ -2860,14 +3041,61 @@ export default function HomePage() {
     storageHelper.setItem('groups', JSON.stringify(next));
   };
 
+
   // 按 code 去重，保留第一次出现的项，避免列表重复
   const dedupeByCode = (list) => {
-    const seen = new Set();
-    return list.filter((f) => {
-      const c = f?.code;
-      if (!c || seen.has(c)) return false;
-      seen.add(c);
-      return true;
+    const seen = new Map();
+    const result = [];
+    list.forEach((fund) => {
+      const code = fund?.code;
+      if (!code) return;
+      if (!seen.has(code)) {
+        result.push(fund);
+        seen.set(code, result.length - 1);
+        return;
+      }
+      const idx = seen.get(code);
+      const existing = result[idx];
+      if (!hasValidOrder(existing?.order) && hasValidOrder(fund?.order)) {
+        result[idx] = { ...existing, order: fund.order };
+      }
+    });
+    return result;
+  };
+
+  const ensureFundOrder = (list) => {
+    let maxOrder = -1;
+    list.forEach((fund) => {
+      if (hasValidOrder(fund?.order)) {
+        maxOrder = Math.max(maxOrder, fund.order);
+      }
+    });
+    return list.map((fund) => {
+      if (!fund || typeof fund !== 'object') return fund;
+      if (hasValidOrder(fund.order)) return fund;
+      maxOrder += 1;
+      return { ...fund, order: maxOrder };
+    });
+  };
+
+  const mergeFundWithOrder = (nextFund, prevFund) => {
+    if (!prevFund) return nextFund;
+    const order = hasValidOrder(nextFund?.order) ? nextFund.order : prevFund.order;
+    return { ...nextFund, order };
+  };
+
+  const assignOrderForNewFunds = (existingFunds, additions) => {
+    let maxOrder = -1;
+    existingFunds.forEach((fund) => {
+      if (hasValidOrder(fund?.order)) {
+        maxOrder = Math.max(maxOrder, fund.order);
+      }
+    });
+    return additions.map((fund) => {
+      if (!fund || typeof fund !== 'object') return fund;
+      if (hasValidOrder(fund.order)) return fund;
+      maxOrder += 1;
+      return { ...fund, order: maxOrder };
     });
   };
 
@@ -2889,7 +3117,7 @@ export default function HomePage() {
     });
   };
 
-  const sanitizeFunds = (list) => dedupeByCode(stripHoldingsFromFunds(list));
+  const sanitizeFunds = (list) => ensureFundOrder(dedupeByCode(stripHoldingsFromFunds(list)));
 
   // 初始化数据加载 - 支持多账本
   useEffect(() => {
@@ -3302,7 +3530,8 @@ export default function HomePage() {
       }
 
       if (newFunds.length > 0) {
-        const updated = sanitizeFunds([...newFunds, ...funds]);
+        const newFundsWithOrder = assignOrderForNewFunds(funds, newFunds);
+        const updated = sanitizeFunds([...newFundsWithOrder, ...funds]);
         setFunds(updated);
         storageHelper.setItem('funds', JSON.stringify(updated));
         updateCurrentPortfolio({ funds: updated });
@@ -3347,9 +3576,9 @@ export default function HomePage() {
           updated.forEach(u => {
             const idx = merged.findIndex(f => f.code === u.code);
             if (idx > -1) {
-              merged[idx] = u;
+              merged[idx] = mergeFundWithOrder(u, merged[idx]);
             } else {
-              merged.push(u);
+              merged.push(mergeFundWithOrder(u));
             }
           });
           const deduped = sanitizeFunds(merged);
@@ -3418,7 +3647,8 @@ export default function HomePage() {
       if (newFunds.length === 0) {
         setError('未添加任何新基金');
       } else {
-        const next = sanitizeFunds([...newFunds, ...funds]);
+        const newFundsWithOrder = assignOrderForNewFunds(funds, newFunds);
+        const next = sanitizeFunds([...newFundsWithOrder, ...funds]);
         setFunds(next);
         storageHelper.setItem('funds', JSON.stringify(next));
         updateCurrentPortfolio({ funds: next });
@@ -3559,13 +3789,23 @@ export default function HomePage() {
     if (payload.version >= 2 && Array.isArray(payload.portfolios)) {
       const portfoliosComparable = payload.portfolios.map(p => {
         const rawFunds = Array.isArray(p.funds) ? p.funds : [];
-        const fundCodes = rawFunds.map(f => normalizeCode(f?.code || f?.CODE)).filter(Boolean);
-        const uniqueFundCodes = Array.from(new Set(fundCodes)).sort();
+        const orderedFundEntries = rawFunds
+          .map(fund => ({
+            code: normalizeCode(fund?.code || fund?.CODE),
+            order: getFundOrderValue(fund)
+          }))
+          .filter(item => item.code)
+          .sort((a, b) => a.order - b.order);
+        const orderedFundCodes = orderedFundEntries.reduce((acc, item) => {
+          if (!acc.includes(item.code)) acc.push(item.code);
+          return acc;
+        }, []);
+        const uniqueFundCodes = orderedFundCodes;
         
         return {
           id: p.id,
           name: p.name,
-          funds: uniqueFundCodes,
+          funds: orderedFundCodes,
           favorites: Array.isArray(p.favorites) 
             ? Array.from(new Set(p.favorites.map(normalizeCode).filter(c => uniqueFundCodes.includes(c)))).sort()
             : [],
@@ -3618,10 +3858,18 @@ export default function HomePage() {
     
     // 兼容老数据结构 (v1)
     const rawFunds = Array.isArray(payload.funds) ? payload.funds : [];
-    const fundCodes = rawFunds
-      .map((fund) => normalizeCode(fund?.code || fund?.CODE))
-      .filter(Boolean);
-    const uniqueFundCodes = Array.from(new Set(fundCodes)).sort();
+    const orderedFundEntries = rawFunds
+      .map((fund) => ({
+        code: normalizeCode(fund?.code || fund?.CODE),
+        order: getFundOrderValue(fund)
+      }))
+      .filter((item) => item.code)
+      .sort((a, b) => a.order - b.order);
+    const orderedFundCodes = orderedFundEntries.reduce((acc, item) => {
+      if (!acc.includes(item.code)) acc.push(item.code);
+      return acc;
+    }, []);
+    const uniqueFundCodes = orderedFundCodes;
 
     const favorites = Array.isArray(payload.favorites)
       ? Array.from(new Set(payload.favorites.map(normalizeCode).filter((code) => uniqueFundCodes.includes(code)))).sort()
@@ -3687,7 +3935,7 @@ export default function HomePage() {
     const viewMode = payload.viewMode === 'list' ? 'list' : 'card';
 
     return JSON.stringify({
-      funds: uniqueFundCodes,
+      funds: orderedFundCodes,
       favorites,
       groups,
       refreshMs: Number.isFinite(payload.refreshMs) ? payload.refreshMs : 30000,
@@ -4903,7 +5151,9 @@ export default function HomePage() {
                   ].map((s) => (
                     <button
                       key={s.id}
-                      className={`chip ${sortBy === s.id ? 'active' : ''}`}
+                      className={`chip ${sortBy === s.id ? 'active' : ''} ${s.id === 'default' ? 'default-chip' : ''}`}
+                      onMouseEnter={s.id === 'default' ? () => setDefaultChipHover(true) : undefined}
+                      onMouseLeave={s.id === 'default' ? () => setDefaultChipHover(false) : undefined}
                       onClick={() => {
                         if (sortBy === s.id) {
                           // 同一按钮重复点击，切换升序/降序
@@ -4914,9 +5164,41 @@ export default function HomePage() {
                           setSortOrder('desc');
                         }
                       }}
-                      style={{ height: '28px', fontSize: '12px', padding: '0 10px', display: 'flex', alignItems: 'center', gap: 4 }}
+                      style={{
+                        height: '28px',
+                        fontSize: '12px',
+                        padding: '0 10px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 0,
+                        ...(s.id === 'default' && defaultChipHover && !sortBadgeHover
+                          ? { transform: 'translateY(-1px)', borderColor: 'var(--accent)' }
+                          : null)
+                      }}
                     >
                       <span>{s.label}</span>
+                      {s.id === 'default' && sortBy === 'default' && (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          className="sort-config-badge"
+                          onMouseEnter={() => setSortBadgeHover(true)}
+                          onMouseLeave={() => setSortBadgeHover(false)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setSortManageOpen(true);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              setSortManageOpen(true);
+                            }
+                          }}
+                          title="编辑默认排序"
+                        >
+                          <SettingsIcon width="13" height="13" />
+                        </span>
+                      )}
                       {s.id !== 'default' && sortBy === s.id && (
                         <span
                           style={{
@@ -5465,6 +5747,16 @@ export default function HomePage() {
           )}
         </div>
       </div>
+
+      <AnimatePresence>
+        {sortManageOpen && (
+          <SortManageModal
+            funds={defaultOrderFunds}
+            onClose={() => setSortManageOpen(false)}
+            onSave={handleSaveSortOrder}
+          />
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {topHoldingsModal.open && (
