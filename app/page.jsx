@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useMemo, useLayoutEffect, useCallback } from 'react';
-import { motion, AnimatePresence, Reorder } from 'framer-motion';
+import { motion, AnimatePresence, Reorder, useDragControls } from 'framer-motion';
 import { createAvatar } from '@dicebear/core';
 import { glass } from '@dicebear/collection';
 import dayjs from 'dayjs';
@@ -1420,6 +1420,83 @@ function ConfirmModal({ title, message, onConfirm, onCancel, confirmText = "确�
   );
 }
 
+function SortManageItem({ item, moveToTop, moveToBottom }) {
+  const dragControls = useDragControls();
+  const [useHandle, setUseHandle] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const media = window.matchMedia('(pointer: coarse)');
+    const update = () => setUseHandle(media.matches);
+    update();
+    if (media.addEventListener) {
+      media.addEventListener('change', update);
+      return () => media.removeEventListener('change', update);
+    }
+    media.addListener(update);
+    return () => media.removeListener(update);
+  }, []);
+
+  return (
+    <Reorder.Item
+      key={item.code}
+      value={item}
+      className="glass"
+      layout
+      dragListener={!useHandle}
+      dragControls={useHandle ? dragControls : undefined}
+      initial={{ opacity: 0, scale: 0.98 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.98 }}
+      transition={{ type: 'spring', stiffness: 500, damping: 35, mass: 1, layout: { duration: 0.2 } }}
+      style={{
+        padding: '10px 12px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        cursor: useHandle ? 'default' : 'grab',
+      }}
+    >
+      <div
+        style={{ cursor: 'grab', display: 'flex', alignItems: 'center', touchAction: 'none' }}
+        onPointerDown={useHandle ? (event) => dragControls.start(event) : undefined}
+      >
+        <DragIcon width="16" height="16" className="muted" />
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
+        <span style={{ fontSize: 14, fontWeight: 600 }}>{item.name || '未知基金'}</span>
+        <span className="muted" style={{ fontSize: 12 }}>#{item.code}</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <button
+          type="button"
+          className="icon-button"
+          onClick={(event) => {
+            event.stopPropagation();
+            moveToTop(item.code);
+          }}
+          title="置顶"
+          style={{ width: 28, height: 28, borderRadius: 8 }}
+        >
+          <MoveTopIcon width="14" height="14" />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          onClick={(event) => {
+            event.stopPropagation();
+            moveToBottom(item.code);
+          }}
+          title="置底"
+          style={{ width: 28, height: 28, borderRadius: 8 }}
+        >
+          <MoveBottomIcon width="14" height="14" />
+        </button>
+      </div>
+    </Reorder.Item>
+  );
+}
+
 function SortManageModal({ funds, onClose, onSave }) {
   const [items, setItems] = useState(funds);
 
@@ -1512,60 +1589,12 @@ function SortManageModal({ funds, onClose, onSave }) {
             }}
           >            <AnimatePresence mode="popLayout">
               {items.map((item) => (
-                <Reorder.Item
+                <SortManageItem
                   key={item.code}
-                  value={item}
-                  className="glass"
-                  layout
-                  initial={{ opacity: 0, scale: 0.98 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.98 }}
-                  transition={{ type: 'spring', stiffness: 500, damping: 35, mass: 1, layout: { duration: 0.2 } }}
-                  style={{
-                    padding: '10px 12px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    cursor: 'grab',
-                    touchAction: 'none',
-                    userSelect: 'none',
-                    WebkitUserSelect: 'none',
-                  }}
-                >
-                  <div style={{ cursor: 'grab', display: 'flex', alignItems: 'center' }}>
-                    <DragIcon width="16" height="16" className="muted" />
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
-                    <span style={{ fontSize: 14, fontWeight: 600 }}>{item.name || '未知基金'}</span>
-                    <span className="muted" style={{ fontSize: 12 }}>#{item.code}</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <button
-                      type="button"
-                      className="icon-button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        moveToTop(item.code);
-                      }}
-                      title="置顶"
-                      style={{ width: 28, height: 28, borderRadius: 8 }}
-                    >
-                      <MoveTopIcon width="14" height="14" />
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        moveToBottom(item.code);
-                      }}
-                      title="置底"
-                      style={{ width: 28, height: 28, borderRadius: 8 }}
-                    >
-                      <MoveBottomIcon width="14" height="14" />
-                    </button>
-                  </div>
-                </Reorder.Item>
+                  item={item}
+                  moveToTop={moveToTop}
+                  moveToBottom={moveToBottom}
+                />
               ))}
             </AnimatePresence>
           </Reorder.Group>
