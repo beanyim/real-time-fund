@@ -303,12 +303,6 @@ function HoldingActionModal({ fund, onClose, onAction, mode = 'full' }) {
           </button>
         </div>
 
-        {isFirst && (
-          <div className="muted" style={{ fontSize: '12px', marginBottom: 16, lineHeight: 1.6 }}>
-            首次设置可直接编辑持仓，或先加仓记录第一笔交易。
-          </div>
-        )}
-
         <div style={{ marginBottom: 20, textAlign: 'center' }}>
           <div className="fund-name" style={{ fontWeight: 600, fontSize: '16px', marginBottom: 4 }}>{fund?.name}</div>
           <div className="muted" style={{ fontSize: '12px' }}>#{fund?.code}</div>
