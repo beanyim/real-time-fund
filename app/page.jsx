@@ -1498,8 +1498,19 @@ function SortManageModal({ funds, onClose, onSave }) {
         </div>
 
         <div style={{ maxHeight: '60vh', overflowY: 'auto', paddingRight: 6 }}>
-          <Reorder.Group axis="y" values={items} onReorder={setItems} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <AnimatePresence mode="popLayout">
+          <Reorder.Group
+            axis="y"
+            values={items}
+            onReorder={setItems}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+              listStyle: 'none',
+              margin: 0,
+              padding: 0,
+            }}
+          >            <AnimatePresence mode="popLayout">
               {items.map((item) => (
                 <Reorder.Item
                   key={item.code}
@@ -1510,7 +1521,16 @@ function SortManageModal({ funds, onClose, onSave }) {
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.98 }}
                   transition={{ type: 'spring', stiffness: 500, damping: 35, mass: 1, layout: { duration: 0.2 } }}
-                  style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 10 }}
+                  style={{
+                    padding: '10px 12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    cursor: 'grab',
+                    touchAction: 'none',
+                    userSelect: 'none',
+                    WebkitUserSelect: 'none',
+                  }}
                 >
                   <div style={{ cursor: 'grab', display: 'flex', alignItems: 'center' }}>
                     <DragIcon width="16" height="16" className="muted" />
