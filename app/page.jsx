@@ -272,14 +272,13 @@ function WeChatModal({ onClose }) {
   );
 }
 
-function HoldingActionModal({ fund, onClose, onAction, mode = 'full' }) {
-  const isFirst = mode === 'first';
+function HoldingActionModal({ fund, onClose, onAction }) {
   return (
     <motion.div
       className="modal-overlay"
       role="dialog"
       aria-modal="true"
-      aria-label={isFirst ? '首次持仓设置' : '持仓操作'}
+      aria-label="持仓操作"
       onClick={onClose}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -291,12 +290,12 @@ function HoldingActionModal({ fund, onClose, onAction, mode = 'full' }) {
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
         className="glass card modal"
         onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: '360px' }}
+        style={{ maxWidth: '320px' }}
       >
-        <div className="title" style={{ marginBottom: isFirst ? 12 : 20, justifyContent: 'space-between' }}>
+        <div className="title" style={{ marginBottom: 20, justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <SettingsIcon width="20" height="20" />
-            <span>{isFirst ? '首次持仓设置' : '持仓操作'}</span>
+            <span>持仓操作</span>
           </div>
           <button className="icon-button" onClick={onClose} style={{ border: 'none', background: 'transparent' }}>
             <CloseIcon width="20" height="20" />
@@ -309,49 +308,28 @@ function HoldingActionModal({ fund, onClose, onAction, mode = 'full' }) {
         </div>
 
         <div className="grid" style={{ gap: 12 }}>
+          <button className="button col-6" onClick={() => onAction('buy')} style={{ background: 'rgba(34, 211, 238, 0.1)', border: '1px solid var(--primary)', color: 'var(--primary)' }}>
+            加仓
+          </button>
+          <button className="button col-6" onClick={() => onAction('sell')} style={{ background: 'rgba(248, 113, 113, 0.1)', border: '1px solid var(--danger)', color: 'var(--danger)' }}>
+            减仓
+          </button>
+          <button className="button col-12" onClick={() => onAction('edit')} style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text)' }}>
+            编辑持仓
+          </button>
           <button
-            className={`button ${isFirst ? 'col-12' : 'col-6'}`}
-            onClick={() => onAction('buy')}
+            className="button col-12"
+            onClick={() => onAction('clear')}
             style={{
-              background: 'rgba(34, 211, 238, 0.12)',
-              border: '1px solid rgba(34, 211, 238, 0.45)',
-              color: 'var(--primary)',
+              marginTop: 8,
+              background: 'linear-gradient(180deg, #ef4444, #f87171)',
+              border: 'none',
+              color: '#2b0b0b',
               fontWeight: 600
             }}
           >
-            加仓
+            清空持仓
           </button>
-          {!isFirst && (
-            <button className="button col-6" onClick={() => onAction('sell')} style={{ background: 'rgba(248, 113, 113, 0.1)', border: '1px solid var(--danger)', color: 'var(--danger)' }}>
-              减仓
-            </button>
-          )}
-          <button
-            className="button col-12"
-            onClick={() => onAction('edit')}
-            style={{
-              background: isFirst ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.05)',
-              color: 'var(--text)',
-              border: isFirst ? '1px solid rgba(255,255,255,0.12)' : undefined
-            }}
-          >
-            编辑持仓
-          </button>
-          {!isFirst && (
-            <button
-              className="button col-12"
-              onClick={() => onAction('clear')}
-              style={{
-                marginTop: 8,
-                background: 'linear-gradient(180deg, #ef4444, #f87171)',
-                border: 'none',
-                color: '#2b0b0b',
-                fontWeight: 600
-              }}
-            >
-              清空持仓
-            </button>
-          )}
         </div>
       </motion.div>
     </motion.div>
@@ -2227,7 +2205,7 @@ export default function HomePage() {
   const [addResultOpen, setAddResultOpen] = useState(false);
   const [addFailures, setAddFailures] = useState([]);
   const [holdingModal, setHoldingModal] = useState({ open: false, fund: null });
-  const [actionModal, setActionModal] = useState({ open: false, fund: null, mode: 'full' });
+  const [actionModal, setActionModal] = useState({ open: false, fund: null });
   const [tradeModal, setTradeModal] = useState({ open: false, fund: null, type: 'buy' }); // type: 'buy' | 'sell'
   const [topHoldingsModal, setTopHoldingsModal] = useState({ open: false, fund: null, items: [], loading: false, error: '' });
   const [clearConfirm, setClearConfirm] = useState(null); // { fund }
@@ -2636,7 +2614,7 @@ export default function HomePage() {
   };
 
   const handleAction = (type, fund) => {
-    setActionModal({ open: false, fund: null, mode: 'full' });
+    setActionModal({ open: false, fund: null });
     if (type === 'edit') {
       setHoldingModal({ open: true, fund });
     } else if (type === 'clear') {
@@ -2644,21 +2622,6 @@ export default function HomePage() {
     } else if (type === 'buy' || type === 'sell') {
       setTradeModal({ open: true, fund, type });
     }
-  };
-
-  const handleFirstHoldingAction = (type, fund) => {
-    if (!fund?.code) return;
-    setActionModal({ open: false, fund: null, mode: 'full' });
-    if (type === 'edit') {
-      setHoldingModal({ open: true, fund });
-    } else if (type === 'buy') {
-      setTradeModal({ open: true, fund, type: 'buy' });
-    }
-  };
-
-  const openHoldingEntry = (fund) => {
-    if (!fund?.code) return;
-    setActionModal({ open: true, fund, mode: 'first' });
   };
 
   const handleClearConfirm = () => {
@@ -3633,61 +3596,44 @@ export default function HomePage() {
     }
   };
 
-  const fetchFundDataSafe = async (code) => {
-    try {
-      const data = await fetchFundData(code);
-      const rawCode = data?.code ?? data?.fundcode ?? data?.CODE;
-      return { code, data, rawCode, error: null };
-    } catch (error) {
-      console.error(`刷新基金 ${code} 失败`, error);
-      return { code, data: null, rawCode: null, error };
-    }
-  };
-
-  const mergeRefreshResults = (prevFunds, results) => {
-    const merged = [...prevFunds];
-    const prevMap = new Map(prevFunds.map((fund) => [fund.code, fund]));
-
-    results.forEach((result) => {
-      const base = result.data || prevMap.get(result.code);
-      if (!base) return;
-      const rawCode = result.rawCode ?? base.code ?? base.fundcode ?? base.CODE;
-      if (rawCode && String(rawCode) !== result.code) {
-        const fallback = prevMap.get(result.code);
-        if (!fallback) return;
-        const fallbackData = { ...fallback, code: result.code };
-        const fallbackIdx = merged.findIndex((fund) => fund.code === result.code);
-        if (fallbackIdx > -1) {
-          merged[fallbackIdx] = mergeFundWithOrder(fallbackData, merged[fallbackIdx]);
-        } else {
-          merged.push(mergeFundWithOrder(fallbackData));
-        }
-        return;
-      }
-      const data = { ...base, code: result.code };
-      const idx = merged.findIndex((fund) => fund.code === result.code);
-      if (idx > -1) {
-        merged[idx] = mergeFundWithOrder(data, merged[idx]);
-      } else {
-        merged.push(mergeFundWithOrder(data));
-      }
-    });
-
-    const deduped = sanitizeFunds(merged);
-    storageHelper.setItem('funds', JSON.stringify(deduped));
-    return deduped;
-  };
-
   const refreshAll = async (codes) => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     setRefreshing(true);
     const uniqueCodes = Array.from(new Set(codes));
     try {
-      const results = await Promise.all(uniqueCodes.map(fetchFundDataSafe));
+      const updated = [];
+      for (const c of uniqueCodes) {
+        try {
+          const data = await fetchFundData(c);
+          updated.push(data);
+        } catch (e) {
+          console.error(`刷新基金 ${c} 失败`, e);
+          // 失败时从当前 state 中寻找旧数据
+          setFunds(prev => {
+            const old = prev.find((f) => f.code === c);
+            if (old) updated.push(old);
+            return prev;
+          });
+        }
+      }
 
-      if (results.length > 0) {
-        setFunds((prev) => mergeRefreshResults(prev, results));
+      if (updated.length > 0) {
+        setFunds(prev => {
+          // 将更新后的数据合并回当前最新的 state 中，防止覆盖掉刚刚导入的数据
+          const merged = [...prev];
+          updated.forEach(u => {
+            const idx = merged.findIndex(f => f.code === u.code);
+            if (idx > -1) {
+              merged[idx] = mergeFundWithOrder(u, merged[idx]);
+            } else {
+              merged.push(mergeFundWithOrder(u));
+            }
+          });
+          const deduped = sanitizeFunds(merged);
+          storageHelper.setItem('funds', JSON.stringify(deduped));
+          return deduped;
+        });
       }
     } catch (e) {
       console.error(e);
@@ -5574,7 +5520,7 @@ export default function HomePage() {
                                       <div
                                         className="table-cell text-right holding-amount-cell"
                                         title="设置持仓"
-                                        onClick={(e) => { e.stopPropagation(); openHoldingEntry(f); }}
+                                        onClick={(e) => { e.stopPropagation(); setHoldingModal({ open: true, fund: f }); }}
                                       >
                                         <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '12px', cursor: 'pointer' }}>
                                           未设置 <SettingsIcon width="12" height="12" />
@@ -5586,12 +5532,12 @@ export default function HomePage() {
                                     <div
                                       className="table-cell text-right holding-amount-cell"
                                       title="点击设置持仓"
-                                      onClick={(e) => { e.stopPropagation(); setActionModal({ open: true, fund: f, mode: 'full' }); }}
+                                      onClick={(e) => { e.stopPropagation(); setActionModal({ open: true, fund: f }); }}
                                     >
                                       <span style={{ fontWeight: 700, marginRight: 6 }}>¥{amount.toFixed(2)}</span>
                                       <button
                                         className="icon-button"
-                                        onClick={(e) => { e.stopPropagation(); setActionModal({ open: true, fund: f, mode: 'full' }); }}
+                                        onClick={(e) => { e.stopPropagation(); setActionModal({ open: true, fund: f }); }}
                                         title="编辑持仓"
                                         style={{ border: 'none', width: '28px', height: '28px', marginLeft: -6 }}
                                       >
@@ -5766,7 +5712,7 @@ export default function HomePage() {
                                           <div
                                             className="value muted"
                                             style={{ fontSize: '14px', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
-                                            onClick={() => openHoldingEntry(f)}
+                                            onClick={() => setHoldingModal({ open: true, fund: f })}
                                           >
                                             未设置 <SettingsIcon width="12" height="12" />
                                           </div>
@@ -5779,7 +5725,7 @@ export default function HomePage() {
                                         <div
                                           className="stat"
                                           style={{ cursor: 'pointer', flexDirection: 'column', gap: 4 }}
-                                          onClick={() => setActionModal({ open: true, fund: f, mode: 'full' })}
+                                          onClick={() => setActionModal({ open: true, fund: f })}
                                         >
                                           <span className="label" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                                             持仓金额 <SettingsIcon width="12" height="12" style={{ opacity: 0.7 }} />
@@ -5948,11 +5894,8 @@ export default function HomePage() {
         {actionModal.open && (
           <HoldingActionModal
             fund={actionModal.fund}
-            mode={actionModal.mode}
-            onClose={() => setActionModal({ open: false, fund: null, mode: 'full' })}
-            onAction={(type) => (actionModal.mode === 'first'
-              ? handleFirstHoldingAction(type, actionModal.fund)
-              : handleAction(type, actionModal.fund))}
+            onClose={() => setActionModal({ open: false, fund: null })}
+            onAction={(type) => handleAction(type, actionModal.fund)}
           />
         )}
       </AnimatePresence>
