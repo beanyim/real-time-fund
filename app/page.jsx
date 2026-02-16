@@ -3633,44 +3633,61 @@ export default function HomePage() {
     }
   };
 
+  const fetchFundDataSafe = async (code) => {
+    try {
+      const data = await fetchFundData(code);
+      const rawCode = data?.code ?? data?.fundcode ?? data?.CODE;
+      return { code, data, rawCode, error: null };
+    } catch (error) {
+      console.error(`刷新基金 ${code} 失败`, error);
+      return { code, data: null, rawCode: null, error };
+    }
+  };
+
+  const mergeRefreshResults = (prevFunds, results) => {
+    const merged = [...prevFunds];
+    const prevMap = new Map(prevFunds.map((fund) => [fund.code, fund]));
+
+    results.forEach((result) => {
+      const base = result.data || prevMap.get(result.code);
+      if (!base) return;
+      const rawCode = result.rawCode ?? base.code ?? base.fundcode ?? base.CODE;
+      if (rawCode && String(rawCode) !== result.code) {
+        const fallback = prevMap.get(result.code);
+        if (!fallback) return;
+        const fallbackData = { ...fallback, code: result.code };
+        const fallbackIdx = merged.findIndex((fund) => fund.code === result.code);
+        if (fallbackIdx > -1) {
+          merged[fallbackIdx] = mergeFundWithOrder(fallbackData, merged[fallbackIdx]);
+        } else {
+          merged.push(mergeFundWithOrder(fallbackData));
+        }
+        return;
+      }
+      const data = { ...base, code: result.code };
+      const idx = merged.findIndex((fund) => fund.code === result.code);
+      if (idx > -1) {
+        merged[idx] = mergeFundWithOrder(data, merged[idx]);
+      } else {
+        merged.push(mergeFundWithOrder(data));
+      }
+    });
+
+    const deduped = sanitizeFunds(merged);
+    storageHelper.setItem('funds', JSON.stringify(deduped));
+    return deduped;
+  };
+
   const refreshAll = async (codes) => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     setRefreshing(true);
     const uniqueCodes = Array.from(new Set(codes));
     try {
-      const updated = [];
-      for (const c of uniqueCodes) {
-        try {
-          const data = await fetchFundData(c);
-          updated.push(data);
-        } catch (e) {
-          console.error(`刷新基金 ${c} 失败`, e);
-          // 失败时从当前 state 中寻找旧数据
-          setFunds(prev => {
-            const old = prev.find((f) => f.code === c);
-            if (old) updated.push(old);
-            return prev;
-          });
-        }
-      }
+      const results = await Promise.all(uniqueCodes.map(fetchFundDataSafe));
 
-      if (updated.length > 0) {
-        setFunds(prev => {
-          // 将更新后的数据合并回当前最新的 state 中，防止覆盖掉刚刚导入的数据
-          const merged = [...prev];
-          updated.forEach(u => {
-            const idx = merged.findIndex(f => f.code === u.code);
-            if (idx > -1) {
-              merged[idx] = mergeFundWithOrder(u, merged[idx]);
-            } else {
-              merged.push(mergeFundWithOrder(u));
-            }
-          });
-          const deduped = sanitizeFunds(merged);
-          storageHelper.setItem('funds', JSON.stringify(deduped));
-          return deduped;
-        });
+      if (results.length > 0) {
+        setFunds((prev) => mergeRefreshResults(prev, results));
       }
     } catch (e) {
       console.error(e);
