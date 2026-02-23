@@ -2249,6 +2249,7 @@ export default function HomePage() {
 
   const holdingsRef = useRef(holdings);
   const pendingTradesRef = useRef(pendingTrades);
+  const activePortfolioIdRef = useRef(null);
   const portfolioDropdownRef = useRef(null);
   const newPortfolioInputRef = useRef(null);
   const topHoldingsRequestRef = useRef(0);
@@ -2257,6 +2258,10 @@ export default function HomePage() {
     holdingsRef.current = holdings;
     pendingTradesRef.current = pendingTrades;
   }, [holdings, pendingTrades]);
+
+  useEffect(() => {
+    activePortfolioIdRef.current = currentPortfolioId;
+  }, [currentPortfolioId]);
 
   // 当前账本
   const currentPortfolio = useMemo(() => {
@@ -3646,6 +3651,7 @@ export default function HomePage() {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     setRefreshing(true);
+    const currentPortfolioIdAtStart = activePortfolioIdRef.current;
     const uniqueCodes = Array.from(new Set(codes));
     try {
       const updated = [];
@@ -3664,7 +3670,7 @@ export default function HomePage() {
         }
       }
 
-      if (updated.length > 0) {
+      if (updated.length > 0 && activePortfolioIdRef.current === currentPortfolioIdAtStart) {
         setFunds(prev => {
           // 将更新后的数据合并回当前最新的 state 中，防止覆盖掉刚刚导入的数据
           const merged = [...prev];
