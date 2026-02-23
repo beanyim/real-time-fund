@@ -2278,8 +2278,16 @@ export default function HomePage() {
   }, [refreshMs, viewMode, currentPortfolioId]);
 
   const switchPortfolio = useCallback((portfolioId) => {
-    const portfolio = portfolios.find(p => p.id === portfolioId);
+    if (!Array.isArray(portfolios) || portfolios.length === 0) return;
+    const resolvedPortfolioId = portfolios.some(p => p.id === portfolioId)
+      ? portfolioId
+      : (currentPortfolioId && portfolios.some(p => p.id === currentPortfolioId)
+        ? currentPortfolioId
+        : portfolios[0]?.id);
+    if (!resolvedPortfolioId) return;
+    const portfolio = portfolios.find(p => p.id === resolvedPortfolioId);
     if (!portfolio) return;
+    lastPortfolioSwitchAtRef.current = Date.now();
     
     const nextFunds = sanitizeFunds(portfolio.funds || []);
     const nextFavorites = portfolio.favorites || [];
@@ -2287,7 +2295,7 @@ export default function HomePage() {
     const nextHoldings = portfolio.holdings || {};
     const nextPendingTrades = portfolio.pendingTrades || [];
 
-    setCurrentPortfolioId(portfolioId);
+    setCurrentPortfolioId(resolvedPortfolioId);
     setFunds(nextFunds);
     setFavorites(new Set(nextFavorites));
     setGroups(nextGroups);
@@ -2302,12 +2310,12 @@ export default function HomePage() {
     localStorage.setItem('pendingTrades', JSON.stringify(nextPendingTrades));
     
     // 保存到 localStorage
-    savePortfoliosToStorage(portfolios, portfolioId);
+    savePortfoliosToStorage(portfolios, resolvedPortfolioId);
     
     // 刷新基金数据
     const codes = nextFunds.map(f => f.code);
     if (codes.length) refreshAll(codes);
-  }, [portfolios, refreshMs, viewMode]);
+  }, [portfolios, currentPortfolioId, savePortfoliosToStorage]);
 
   const addPortfolio = useCallback((name) => {
     const newPortfolio = createPortfolio(name || '新账本');
@@ -2848,6 +2856,7 @@ export default function HomePage() {
   const syncDebounceRef = useRef(null);
   const lastSyncedRef = useRef('');
   const skipSyncRef = useRef(false);
+  const lastPortfolioSwitchAtRef = useRef(0);
   const userIdRef = useRef(null);
 
   useEffect(() => {
@@ -4127,26 +4136,33 @@ export default function HomePage() {
       if (cloudUpdatedAt) {
         localStorage.setItem('localUpdatedAt', toTz(cloudUpdatedAt).toISOString());
       }
+      const now = Date.now();
+      const recentSwitchThresholdMs = 5000;
+      const shouldPreserveCurrentPortfolio = now - lastPortfolioSwitchAtRef.current <= recentSwitchThresholdMs;
       
       // 检查是否为 v2 多账本数据结构
       if (cloudData.version >= 2 && Array.isArray(cloudData.portfolios)) {
         // v2 数据结构
         const validatedConfig = validateV2Data(cloudData);
         const cleanedPortfolios = stripHoldingsFromPortfolios(validatedConfig.portfolios || []);
-        const cleanedConfig = { ...validatedConfig, portfolios: cleanedPortfolios };
+        const preservedCurrentId = shouldPreserveCurrentPortfolio && currentPortfolioId
+          && cleanedPortfolios.some((p) => p.id === currentPortfolioId)
+          ? currentPortfolioId
+          : validatedConfig.currentPortfolioId;
+        const cleanedConfig = { ...validatedConfig, currentPortfolioId: preservedCurrentId, portfolios: cleanedPortfolios };
         
         // 保存到 localStorage
         localStorage.setItem('userConfig', JSON.stringify(cleanedConfig));
         
         // 更新状态
         setPortfolios(cleanedPortfolios);
-        setCurrentPortfolioId(validatedConfig.currentPortfolioId);
-        setRefreshMs(validatedConfig.refreshMs);
-        setTempSeconds(Math.round(validatedConfig.refreshMs / 1000));
-        setViewMode(validatedConfig.viewMode);
+        setCurrentPortfolioId(cleanedConfig.currentPortfolioId);
+        setRefreshMs(cleanedConfig.refreshMs);
+        setTempSeconds(Math.round(cleanedConfig.refreshMs / 1000));
+        setViewMode(cleanedConfig.viewMode);
         
         // 加载当前账本数据
-        const currentP = cleanedPortfolios.find(p => p.id === validatedConfig.currentPortfolioId) 
+        const currentP = cleanedPortfolios.find(p => p.id === cleanedConfig.currentPortfolioId) 
           || cleanedPortfolios[0];
         if (currentP) {
           const dedupedFunds = sanitizeFunds(currentP.funds || []);
@@ -4162,8 +4178,8 @@ export default function HomePage() {
           localStorage.setItem('groups', JSON.stringify(currentP.groups || []));
           localStorage.setItem('holdings', JSON.stringify(currentP.holdings || {}));
           localStorage.setItem('pendingTrades', JSON.stringify(currentP.pendingTrades || []));
-          localStorage.setItem('refreshMs', String(validatedConfig.refreshMs));
-          localStorage.setItem('viewMode', validatedConfig.viewMode);
+          localStorage.setItem('refreshMs', String(cleanedConfig.refreshMs));
+          localStorage.setItem('viewMode', cleanedConfig.viewMode);
           
           const codes = dedupedFunds.map(f => f.code);
           if (codes.length) await refreshAll(codes);
