@@ -9,12 +9,11 @@ import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import Announcement from "./components/Announcement";
 import { DatePicker, DonateTabs, NumericInput, Stat } from "./components/Common";
-import { ChevronIcon, CloseIcon, CloudIcon, DragIcon, ExitIcon, EyeIcon, EyeOffIcon, GridIcon, ListIcon, LoginIcon, LogoutIcon, MailIcon, MoveBottomIcon, MoveTopIcon, PinIcon, PinOffIcon, PlusIcon, RefreshIcon, SettingsIcon, SortIcon, StarIcon, TrashIcon, UpdateIcon, UserIcon } from "./components/Icons";
+import { ChevronIcon, CloseIcon, CloudIcon, DragIcon, ExitIcon, EyeIcon, EyeOffIcon, GridIcon, ListIcon, LoginIcon, LogoutIcon, MailIcon, MoveBottomIcon, MoveTopIcon, PinIcon, PinOffIcon, PlusIcon, RefreshIcon, SettingsIcon, SortIcon, StarIcon, TrashIcon, UserIcon } from "./components/Icons";
 import weChatGroupImg from "./assets/weChatGroup.png";
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { isLegacyData, migrateToV2, createEmptyV2Data, createPortfolio, mergeOldDataToPortfolio, validateV2Data } from './lib/migration';
-import { fetchFundData, fetchFundHoldings, fetchLatestRelease, fetchShanghaiIndexDate, fetchSmartFundNetValue, searchFunds, submitFeedback } from './api/fund';
-import packageJson from '../package.json';
+import { fetchFundData, fetchFundHoldings, fetchShanghaiIndexDate, fetchSmartFundNetValue, searchFunds, submitFeedback } from './api/fund';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -2410,32 +2409,7 @@ export default function HomePage() {
     }
   }, []);
 
-  // 检查更新
-  const [hasUpdate, setHasUpdate] = useState(false);
-  const [latestVersion, setLatestVersion] = useState('');
-  const [updateContent, setUpdateContent] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
-
-  useEffect(() => {
-    const checkUpdate = async () => {
-      try {
-        const data = await fetchLatestRelease();
-        if (!data?.tagName) return;
-        const remoteVersion = data.tagName.replace(/^v/, '');
-        if (remoteVersion !== packageJson.version) {
-          setHasUpdate(true);
-          setLatestVersion(remoteVersion);
-          setUpdateContent(data.body || '');
-        }
-      } catch (e) {
-        console.error('Check update failed:', e);
-      }
-    };
-
-    checkUpdate();
-    const interval = setInterval(checkUpdate, 10 * 60 * 1000); // 10 minutes
-    return () => clearInterval(interval);
-  }, []);
 
   // 存储当前被划开的基金代码
   const [swipedFundCode, setSwipedFundCode] = useState(null);
@@ -2848,7 +2822,6 @@ export default function HomePage() {
     setLoginModalOpen(true);
   };
 
-  const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [cloudConfigModal, setCloudConfigModal] = useState({
     open: false,
     userId: null,
@@ -4679,7 +4652,6 @@ export default function HomePage() {
       !!clearConfirm ||
       donateOpen ||
       !!fundDeleteConfirm ||
-      updateModalOpen ||
       weChatOpen ||
       portfolioModalOpen ||
       importChoiceModal.open ||
@@ -4718,7 +4690,6 @@ export default function HomePage() {
     topHoldingsModal.open,
     clearConfirm,
     donateOpen,
-    updateModalOpen,
     weChatOpen,
     portfolioModalOpen,
     importChoiceModal.open,
@@ -4823,16 +4794,6 @@ export default function HomePage() {
           </AnimatePresence>
         </div>
         <div className="actions">
-          {hasUpdate && (
-            <div
-              className="badge"
-              title={`发现新版本 ${latestVersion}，点击前往下载`}
-              style={{ cursor: 'pointer', borderColor: 'var(--success)', color: 'var(--success)' }}
-              onClick={() => setUpdateModalOpen(true)}
-            >
-              <UpdateIcon width="14" height="14" />
-            </div>
-          )}
           <div className="badge" title="当前刷新频率">
             <span>刷新</span>
             <strong>{Math.round(refreshMs / 1000)}秒</strong>
@@ -6581,75 +6542,6 @@ export default function HomePage() {
           </div>
         </div>
       )}
-
-      {/* 更新提示弹窗 */}
-      <AnimatePresence>
-        {updateModalOpen && (
-          <motion.div
-            className="modal-overlay"
-            role="dialog"
-            aria-modal="true"
-            aria-label="更新提示"
-            onClick={() => setUpdateModalOpen(false)}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            style={{ zIndex: 10002 }}
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="glass card modal"
-              style={{ maxWidth: '400px' }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="title" style={{ marginBottom: 12 }}>
-                <UpdateIcon width="20" height="20" style={{color: 'var(--success)'}} />
-                <span>更新提示</span>
-              </div>
-              <div style={{ marginBottom: 24 }}>
-                <p className="muted" style={{ fontSize: '14px', lineHeight: '1.6', marginBottom: 12 }}>
-                  检测到新版本，是否刷新浏览器以更新？
-                  <br/>
-                  更新内容如下：
-                </p>
-                {updateContent && (
-                  <div style={{
-                    background: 'rgba(0,0,0,0.2)',
-                    padding: '12px',
-                    borderRadius: '8px',
-                    fontSize: '13px',
-                    lineHeight: '1.5',
-                    maxHeight: '200px',
-                    overflowY: 'auto',
-                    whiteSpace: 'pre-wrap',
-                    border: '1px solid rgba(255,255,255,0.1)'
-                  }}>
-                    {updateContent}
-                  </div>
-                )}
-              </div>
-              <div className="row" style={{ gap: 12 }}>
-                <button
-                  className="button secondary"
-                  onClick={() => setUpdateModalOpen(false)}
-                  style={{ flex: 1, background: 'rgba(255,255,255,0.05)', color: 'var(--text)' }}
-                >
-                  取消
-                </button>
-                <button
-                  className="button"
-                  onClick={() => window.location.reload()}
-                  style={{ flex: 1, background: 'var(--success)', color: '#fff', border: 'none' }}
-                >
-                  刷新浏览器
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* 登录模态框 */}
       {loginModalOpen && (
