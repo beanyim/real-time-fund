@@ -9,11 +9,10 @@ import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import Announcement from "./components/Announcement";
 import { DatePicker, DonateTabs, NumericInput, Stat } from "./components/Common";
-import { ArrowDownIcon, ArrowUpIcon, ChevronIcon, CloseIcon, CloudIcon, DragIcon, ExitIcon, EyeIcon, EyeOffIcon, GridIcon, ListIcon, LoginIcon, LogoutIcon, MailIcon, MoveBottomIcon, MoveTopIcon, PinIcon, PinOffIcon, PlusIcon, RefreshIcon, SettingsIcon, SortIcon, StarIcon, TrashIcon, UpdateIcon, UserIcon } from "./components/Icons";
-import githubImg from "./assets/github.svg";
+import { ChevronIcon, CloseIcon, CloudIcon, DragIcon, ExitIcon, EyeIcon, EyeOffIcon, GridIcon, ListIcon, LoginIcon, LogoutIcon, MailIcon, MoveBottomIcon, MoveTopIcon, PinIcon, PinOffIcon, PlusIcon, RefreshIcon, SettingsIcon, SortIcon, StarIcon, TrashIcon, UpdateIcon, UserIcon } from "./components/Icons";
 import weChatGroupImg from "./assets/weChatGroup.png";
 import { supabase, isSupabaseConfigured } from './lib/supabase';
-import { isLegacyData, migrateToV2, createEmptyV2Data, createPortfolio, mergeOldDataToPortfolio, validateV2Data, generateId } from './lib/migration';
+import { isLegacyData, migrateToV2, createEmptyV2Data, createPortfolio, mergeOldDataToPortfolio, validateV2Data } from './lib/migration';
 import { fetchFundData, fetchFundHoldings, fetchLatestRelease, fetchShanghaiIndexDate, fetchSmartFundNetValue, searchFunds, submitFeedback } from './api/fund';
 import packageJson from '../package.json';
 
