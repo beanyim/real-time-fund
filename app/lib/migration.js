@@ -46,8 +46,6 @@ export function migrateToV2(oldData, portfolioName = '默认账本') {
     refreshMs: typeof oldData.refreshMs === 'number' && oldData.refreshMs >= 5000 
       ? oldData.refreshMs 
       : 30000,
-    viewMode: oldData.viewMode === 'list' ? 'list' : 'card',
-    currentPortfolioId: portfolioId,
     portfolios: [
       {
         id: portfolioId,
@@ -76,8 +74,6 @@ export function createEmptyV2Data() {
   return {
     version: 2,
     refreshMs: 30000,
-    viewMode: 'card',
-    currentPortfolioId: portfolioId,
     portfolios: [
       {
         id: portfolioId,
@@ -206,8 +202,6 @@ export function validateV2Data(data) {
     refreshMs: typeof data.refreshMs === 'number' && data.refreshMs >= 5000 
       ? data.refreshMs 
       : 30000,
-    viewMode: data.viewMode === 'list' ? 'list' : 'card',
-    currentPortfolioId: data.currentPortfolioId || null,
     portfolios: []
   };
 
@@ -228,12 +222,6 @@ export function validateV2Data(data) {
   } else {
     // 没有账本，创建默认账本
     result.portfolios = [createPortfolio('默认账本')];
-  }
-
-  // 确保 currentPortfolioId 有效
-  const portfolioIds = result.portfolios.map(p => p.id);
-  if (!result.currentPortfolioId || !portfolioIds.includes(result.currentPortfolioId)) {
-    result.currentPortfolioId = result.portfolios[0].id;
   }
 
   return result;
