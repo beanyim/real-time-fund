@@ -2294,6 +2294,7 @@ export default function HomePage() {
     const nextFavorites = portfolio.favorites || [];
     const nextGroups = portfolio.groups || [];
     const nextHoldings = portfolio.holdings || {};
+    // 切换账本时，即使为空也替换待处理交易
     const nextPendingTrades = portfolio.pendingTrades || [];
 
     setCurrentPortfolioId(resolvedPortfolioId);
