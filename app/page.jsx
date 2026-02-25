@@ -2328,7 +2328,9 @@ export default function HomePage() {
     if (!portfolio) return;
     lastPortfolioSwitchAtRef.current = Date.now();
 
-    const nextFunds = sanitizeFunds(portfolio.funds || []);
+    const { mergedFunds } = resolveFundsWithInfo(portfolio.funds || []);
+    const nextFunds = sanitizeFunds(mergedFunds);
+    const nextFundsForStorage = prepareFundsForStorage(nextFunds);
     const nextFavorites = portfolio.favorites || [];
     const nextGroups = portfolio.groups || [];
     const nextHoldings = portfolio.holdings || {};
@@ -2345,7 +2347,7 @@ export default function HomePage() {
     setPendingTrades(nextPendingTrades);
     setCurrentTab('all');
 
-    localStorage.setItem('funds', JSON.stringify(nextFunds));
+    localStorage.setItem('funds', JSON.stringify(nextFundsForStorage));
     localStorage.setItem('favorites', JSON.stringify(nextFavorites));
     localStorage.setItem('groups', JSON.stringify(nextGroups));
     localStorage.setItem('holdings', JSON.stringify(nextHoldings));
@@ -2384,14 +2386,19 @@ export default function HomePage() {
     // 如果删除的是当前账本，切换到第一个
     if (portfolioId === currentPortfolioId) {
       const nextPortfolio = newPortfolios[0];
+      const resolved = resolveFundsWithInfo(nextPortfolio.funds || []);
+      const nextFunds = sanitizeFunds(resolved.mergedFunds);
+      const fundsForStorage = prepareFundsForStorage(nextFunds);
       setCurrentPortfolioId(nextPortfolio.id);
       localStorage.setItem('currentPortfolioId', nextPortfolio.id);
-      setFunds(sanitizeFunds(nextPortfolio.funds || []));
+      activePortfolioIdRef.current = nextPortfolio.id;
+      setFunds(nextFunds);
       setFavorites(new Set(nextPortfolio.favorites || []));
       setGroups(nextPortfolio.groups || []);
       setHoldings(nextPortfolio.holdings || {});
       setPendingTrades(nextPortfolio.pendingTrades || []);
       setCurrentTab('all');
+      localStorage.setItem('funds', JSON.stringify(fundsForStorage));
       savePortfoliosToStorage(newPortfolios);
     } else {
       savePortfoliosToStorage(newPortfolios);
@@ -2937,7 +2944,7 @@ export default function HomePage() {
           ? storedPortfolioId
           : config.portfolios[0].id;
         const rawFunds = JSON.parse(localStorage.getItem('funds') || '[]');
-        const cleanedFunds = stripHoldingsFromFunds(rawFunds);
+        const cleanedFunds = prepareFundsForStorage(rawFunds);
         const rawFavorites = JSON.parse(localStorage.getItem('favorites') || '[]');
         const rawGroups = JSON.parse(localStorage.getItem('groups') || '[]');
         const rawHoldings = JSON.parse(localStorage.getItem('holdings') || '{}');
@@ -3012,9 +3019,11 @@ export default function HomePage() {
         const nextOrder = orderMap.has(fund.code) ? orderMap.get(fund.code) : getFundOrderValue(fund);
         return { ...fund, order: nextOrder };
       });
-      storageHelper.setItem('funds', JSON.stringify(next));
-      updateCurrentPortfolio({ funds: next });
-      return next;
+      const mergedFunds = sanitizeFunds(mergeFundsWithInfo(next, updateFundsInfoFromList(next)));
+      const fundsForStorage = prepareFundsForStorage(mergedFunds);
+      storageHelper.setItem('funds', JSON.stringify(fundsForStorage));
+      updateCurrentPortfolio({ funds: fundsForStorage });
+      return mergedFunds;
     });
   }, [storageHelper, updateCurrentPortfolio]);
 
@@ -3223,11 +3232,150 @@ export default function HomePage() {
     });
   };
 
+  const FUND_INFO_KEYS = ['dwjz', 'gsz', 'gszzl', 'gztime', 'jzrq', 'name', 'zzl'];
+
+  const stripFundInfoFromFund = (fund) => {
+    if (!fund || typeof fund !== 'object') return fund;
+    const { dwjz, gsz, gszzl, gztime, jzrq, name, zzl, ...rest } = fund;
+    return rest;
+  };
+
+  const stripFundInfoFromFunds = (list) => {
+    if (!Array.isArray(list)) return [];
+    return list.map((fund) => stripFundInfoFromFund(fund));
+  };
+
+  const readFundsInfo = () => {
+    if (typeof window === 'undefined') return {};
+    try {
+      const raw = localStorage.getItem('fundsInfo');
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const writeFundsInfo = (next) => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem('fundsInfo', JSON.stringify(next || {}));
+  };
+
+  const mergeFundsWithInfo = (list, infoMap) => {
+    if (!Array.isArray(list)) return [];
+    return list.map((fund) => {
+      if (!fund || typeof fund !== 'object') return fund;
+      const code = fund.code;
+      if (!code) return fund;
+      const info = infoMap && typeof infoMap === 'object' ? infoMap[code] : null;
+      return info ? { ...fund, ...info } : fund;
+    });
+  };
+
+  const extractFundsInfoAndStrip = (list, baseInfo = {}) => {
+    if (!Array.isArray(list)) return { cleanedFunds: [], nextInfo: { ...baseInfo }, didStrip: false };
+    const nextInfo = { ...baseInfo };
+    let didStrip = false;
+    const cleanedFunds = list.map((fund) => {
+      if (!fund || typeof fund !== 'object') return fund;
+      const code = fund.code;
+      const info = {};
+      let hasInfo = false;
+      FUND_INFO_KEYS.forEach((key) => {
+        if (fund[key] !== undefined) {
+          info[key] = fund[key];
+          hasInfo = true;
+        }
+      });
+      if (code && hasInfo) {
+        nextInfo[code] = { ...(nextInfo[code] || {}), ...info };
+        didStrip = true;
+      }
+      return stripFundInfoFromFund(fund);
+    });
+    return { cleanedFunds, nextInfo, didStrip };
+  };
+
+  const collectFundInfo = (fund) => {
+    if (!fund || typeof fund !== 'object') return null;
+    const info = {};
+    let hasInfo = false;
+    FUND_INFO_KEYS.forEach((key) => {
+      if (fund[key] !== undefined) {
+        info[key] = fund[key];
+        hasInfo = true;
+      }
+    });
+    return hasInfo ? info : null;
+  };
+
+  const updateFundsInfoFromList = (list) => {
+    if (!Array.isArray(list) || list.length === 0) return readFundsInfo();
+    const current = readFundsInfo();
+    let changed = false;
+    const next = { ...current };
+    list.forEach((fund) => {
+      const code = fund?.code;
+      if (!code) return;
+      const info = collectFundInfo(fund);
+      if (!info) return;
+      next[code] = { ...(next[code] || {}), ...info };
+      changed = true;
+    });
+    if (changed) writeFundsInfo(next);
+    return next;
+  };
+
+  const removeFundsInfo = (codes) => {
+    if (!codes) return;
+    const list = Array.isArray(codes) ? codes : [codes];
+    if (!list.length) return;
+    const current = readFundsInfo();
+    let changed = false;
+    const next = { ...current };
+    list.forEach((code) => {
+      if (!code || !(code in next)) return;
+      delete next[code];
+      changed = true;
+    });
+    if (changed) writeFundsInfo(next);
+  };
+
+  const prepareFundsForStorage = (list) => stripFundInfoFromFunds(stripHoldingsFromFunds(list));
+
+  const resolveFundsWithInfo = (rawFunds) => {
+    const currentInfo = readFundsInfo();
+    const { cleanedFunds, nextInfo, didStrip } = extractFundsInfoAndStrip(rawFunds, currentInfo);
+    if (didStrip) writeFundsInfo(nextInfo);
+    return {
+      cleanedFunds,
+      mergedFunds: mergeFundsWithInfo(cleanedFunds, nextInfo),
+      fundsInfo: nextInfo,
+      didStrip
+    };
+  };
+
+  const sanitizePortfoliosWithInfo = (portfolios) => {
+    const rawList = Array.isArray(portfolios) ? portfolios : [];
+    let nextInfo = readFundsInfo();
+    let didStrip = false;
+    const cleanedPortfolios = rawList.map((p) => {
+      if (!p || typeof p !== 'object') return p;
+      const { cleanedFunds, nextInfo: updatedInfo, didStrip: stripped } = extractFundsInfoAndStrip(p.funds || [], nextInfo);
+      nextInfo = updatedInfo;
+      if (stripped) didStrip = true;
+      const funds = stripHoldingsFromFunds(cleanedFunds);
+      return { ...p, funds };
+    });
+    if (didStrip) writeFundsInfo(nextInfo);
+    return { cleanedPortfolios, didStrip, fundsInfo: nextInfo };
+  };
+
   const stripHoldingsFromPortfolios = (list) => {
     if (!Array.isArray(list)) return [];
     return list.map((p) => {
       if (!p || typeof p !== 'object') return p;
-      const funds = stripHoldingsFromFunds(p.funds || []);
+      const funds = stripFundInfoFromFunds(stripHoldingsFromFunds(p.funds || []));
       return { ...p, funds };
     });
   };
@@ -3251,7 +3399,7 @@ export default function HomePage() {
       if (userConfig && userConfig.version >= 2 && Array.isArray(userConfig.portfolios)) {
         // v2 数据结构
         const validatedConfig = validateV2Data(userConfig);
-        const cleanedPortfolios = stripHoldingsFromPortfolios(validatedConfig.portfolios || []);
+        const { cleanedPortfolios } = sanitizePortfoliosWithInfo(validatedConfig.portfolios || []);
         const cleanedConfig = {
           ...validatedConfig,
           portfolios: cleanedPortfolios
@@ -3277,12 +3425,15 @@ export default function HomePage() {
         const currentP = cleanedPortfolios.find(p => p.id === resolvedPortfolioId)
           || cleanedPortfolios[0];
         if (currentP) {
-          const dedupedFunds = sanitizeFunds(currentP.funds || []);
+          const resolved = resolveFundsWithInfo(currentP.funds || []);
+          const dedupedFunds = sanitizeFunds(resolved.mergedFunds);
+          const fundsForStorage = prepareFundsForStorage(dedupedFunds);
           setFunds(dedupedFunds);
           setFavorites(new Set(currentP.favorites || []));
           setGroups(currentP.groups || []);
           setHoldings(currentP.holdings || {});
           setPendingTrades(currentP.pendingTrades || []);
+          localStorage.setItem('funds', JSON.stringify(fundsForStorage));
 
           const codes = dedupedFunds.map(f => f.code);
           if (codes.length) refreshAll(codes);
@@ -3301,9 +3452,10 @@ export default function HomePage() {
         const hasOldData = Array.isArray(oldFunds) && oldFunds.length > 0;
 
         if (hasOldData) {
+          const resolvedLegacy = resolveFundsWithInfo(oldFunds);
           // 迁移老数据到 v2 结构
           const oldData = {
-            funds: oldFunds,
+            funds: resolvedLegacy.cleanedFunds,
             favorites: oldFavorites,
             groups: oldGroups,
             holdings: oldHoldings,
@@ -3333,12 +3485,15 @@ export default function HomePage() {
           localStorage.setItem('viewMode', resolvedViewMode);
 
           const currentP = cleanedV2Data.portfolios[0];
-          const dedupedFunds = sanitizeFunds(currentP.funds);
+          const resolved = resolveFundsWithInfo(currentP.funds || []);
+          const dedupedFunds = sanitizeFunds(resolved.mergedFunds);
+          const fundsForStorage = prepareFundsForStorage(dedupedFunds);
           setFunds(dedupedFunds);
           setFavorites(new Set(currentP.favorites));
           setGroups(currentP.groups);
           setHoldings(currentP.holdings);
           setPendingTrades(currentP.pendingTrades);
+          localStorage.setItem('funds', JSON.stringify(fundsForStorage));
 
           const codes = dedupedFunds.map(f => f.code);
           if (codes.length) refreshAll(codes);
@@ -3669,10 +3824,12 @@ export default function HomePage() {
 
       if (newFunds.length > 0) {
         const newFundsWithOrder = assignOrderForNewFunds(funds, newFunds);
-        const updated = sanitizeFunds([...newFundsWithOrder, ...funds]);
+        const infoMap = updateFundsInfoFromList(newFunds);
+        const updated = sanitizeFunds(mergeFundsWithInfo([...newFundsWithOrder, ...funds], infoMap));
+        const fundsForStorage = prepareFundsForStorage(updated);
         setFunds(updated);
-        storageHelper.setItem('funds', JSON.stringify(updated));
-        updateCurrentPortfolio({ funds: updated });
+        storageHelper.setItem('funds', JSON.stringify(fundsForStorage));
+        updateCurrentPortfolio({ funds: fundsForStorage });
       }
 
       setSelectedFunds([]);
@@ -3709,6 +3866,7 @@ export default function HomePage() {
       }
 
       if (updated.length > 0 && activePortfolioIdRef.current === currentPortfolioIdAtStart) {
+        const infoMap = updateFundsInfoFromList(updated);
         setFunds(prev => {
           // 将更新后的数据合并回当前最新的 state 中，防止覆盖掉刚刚导入的数据
           const merged = [...prev];
@@ -3720,8 +3878,10 @@ export default function HomePage() {
               merged.push(mergeFundWithOrder(u));
             }
           });
-          const deduped = sanitizeFunds(merged);
-          storageHelper.setItem('funds', JSON.stringify(deduped));
+          const mergedWithInfo = mergeFundsWithInfo(merged, infoMap);
+          const deduped = sanitizeFunds(mergedWithInfo);
+          const fundsForStorage = prepareFundsForStorage(deduped);
+          storageHelper.setItem('funds', JSON.stringify(fundsForStorage));
           return deduped;
         });
       }
@@ -3787,10 +3947,12 @@ export default function HomePage() {
         setError('未添加任何新基金');
       } else {
         const newFundsWithOrder = assignOrderForNewFunds(funds, newFunds);
-        const next = sanitizeFunds([...newFundsWithOrder, ...funds]);
+        const infoMap = updateFundsInfoFromList(newFunds);
+        const next = sanitizeFunds(mergeFundsWithInfo([...newFundsWithOrder, ...funds], infoMap));
+        const fundsForStorage = prepareFundsForStorage(next);
         setFunds(next);
-        storageHelper.setItem('funds', JSON.stringify(next));
-        updateCurrentPortfolio({ funds: next });
+        storageHelper.setItem('funds', JSON.stringify(fundsForStorage));
+        updateCurrentPortfolio({ funds: fundsForStorage });
       }
       setSearchTerm('');
       setSelectedFunds([]);
@@ -3808,8 +3970,10 @@ export default function HomePage() {
 
   const removeFund = (removeCode) => {
     const next = funds.filter((f) => f.code !== removeCode);
+    removeFundsInfo(removeCode);
+    const fundsForStorage = prepareFundsForStorage(next);
     setFunds(next);
-    storageHelper.setItem('funds', JSON.stringify(next));
+    storageHelper.setItem('funds', JSON.stringify(fundsForStorage));
 
     // 同步删除分组中的失效代码
     const nextGroups = groups.map(g => ({
@@ -3838,7 +4002,7 @@ export default function HomePage() {
     storageHelper.setItem('pendingTrades', JSON.stringify(nextPendingTrades));
 
     updateCurrentPortfolio({
-      funds: next,
+      funds: fundsForStorage,
       groups: nextGroups,
       favorites: Array.from(nextFavorites),
       holdings: nextHoldings,
@@ -4095,7 +4259,7 @@ export default function HomePage() {
       }
 
       // 降级到老数据结构
-      const funds = stripHoldingsFromFunds(JSON.parse(localStorage.getItem('funds') || '[]'));
+      const funds = prepareFundsForStorage(JSON.parse(localStorage.getItem('funds') || '[]'));
       const favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
       const groups = JSON.parse(localStorage.getItem('groups') || '[]');
       const fundCodes = new Set(
@@ -4180,7 +4344,7 @@ export default function HomePage() {
       if (cloudData.version >= 2 && Array.isArray(cloudData.portfolios)) {
         // v2 数据结构
         const validatedConfig = validateV2Data(cloudData);
-        const cleanedPortfolios = stripHoldingsFromPortfolios(validatedConfig.portfolios || []);
+        const { cleanedPortfolios, didStrip } = sanitizePortfoliosWithInfo(validatedConfig.portfolios || []);
         const storedPortfolioId = localStorage.getItem('currentPortfolioId');
         const resolvedCurrentId = shouldPreserveCurrentPortfolio && currentPortfolioId
           && cleanedPortfolios.some((p) => p.id === currentPortfolioId)
@@ -4209,7 +4373,9 @@ export default function HomePage() {
         const currentP = cleanedPortfolios.find(p => p.id === resolvedCurrentId)
           || cleanedPortfolios[0];
         if (currentP) {
-          const dedupedFunds = sanitizeFunds(currentP.funds || []);
+          const resolved = resolveFundsWithInfo(currentP.funds || []);
+          const dedupedFunds = sanitizeFunds(resolved.mergedFunds);
+          const fundsForStorage = prepareFundsForStorage(dedupedFunds);
           setFunds(dedupedFunds);
           setFavorites(new Set(currentP.favorites || []));
           setGroups(currentP.groups || []);
@@ -4217,7 +4383,7 @@ export default function HomePage() {
           setPendingTrades(currentP.pendingTrades || []);
 
           // 同步到老的 localStorage keys（兼容）
-          localStorage.setItem('funds', JSON.stringify(dedupedFunds));
+          localStorage.setItem('funds', JSON.stringify(fundsForStorage));
           localStorage.setItem('favorites', JSON.stringify(currentP.favorites || []));
           localStorage.setItem('groups', JSON.stringify(currentP.groups || []));
           localStorage.setItem('holdings', JSON.stringify(currentP.holdings || {}));
@@ -4226,6 +4392,9 @@ export default function HomePage() {
 
           const codes = dedupedFunds.map(f => f.code);
           if (codes.length) await refreshAll(codes);
+        }
+        if (didStrip && userIdRef.current) {
+          await syncUserConfig(userIdRef.current, false);
         }
       } else {
         // 老数据结构 (v1) - 迁移为 v2
@@ -4239,9 +4408,11 @@ export default function HomePage() {
           localStorage.setItem('currentPortfolioId', resolvedPortfolioId);
         }
 
-        const nextFunds = Array.isArray(cloudData.funds) ? sanitizeFunds(cloudData.funds) : [];
+        const resolvedLegacyFunds = resolveFundsWithInfo(Array.isArray(cloudData.funds) ? cloudData.funds : []);
+        const nextFunds = sanitizeFunds(resolvedLegacyFunds.mergedFunds);
+        const fundsForStorage = prepareFundsForStorage(nextFunds);
         setFunds(nextFunds);
-        localStorage.setItem('funds', JSON.stringify(nextFunds));
+        localStorage.setItem('funds', JSON.stringify(fundsForStorage));
         const nextFundCodes = new Set(nextFunds.map((f) => f.code));
 
         const nextFavorites = Array.isArray(cloudData.favorites) ? cloudData.favorites : [];
@@ -4533,7 +4704,7 @@ export default function HomePage() {
   // 导入 v2 数据
   const importV2Data = async (data) => {
     const validatedData = validateV2Data(data);
-    const cleanedPortfolios = stripHoldingsFromPortfolios(validatedData.portfolios || []);
+    const { cleanedPortfolios } = sanitizePortfoliosWithInfo(validatedData.portfolios || []);
     const storedPortfolioId = localStorage.getItem('currentPortfolioId');
     const nextCurrentPortfolioId = storedPortfolioId && cleanedPortfolios.some(p => p.id === storedPortfolioId)
       ? storedPortfolioId
@@ -4550,19 +4721,22 @@ export default function HomePage() {
     if (nextCurrentPortfolioId) {
       setCurrentPortfolioId(nextCurrentPortfolioId);
       localStorage.setItem('currentPortfolioId', nextCurrentPortfolioId);
+      activePortfolioIdRef.current = nextCurrentPortfolioId;
     }
 
     // 刷新当前账本数据
     const currentP = cleanedPortfolios.find(p => p.id === nextCurrentPortfolioId) || cleanedPortfolios[0];
     if (currentP) {
-      const dedupedFunds = sanitizeFunds(currentP.funds || []);
+      const resolved = resolveFundsWithInfo(currentP.funds || []);
+      const dedupedFunds = sanitizeFunds(resolved.mergedFunds);
+      const fundsForStorage = prepareFundsForStorage(dedupedFunds);
       setFunds(dedupedFunds);
       setFavorites(new Set(currentP.favorites || []));
       setGroups(currentP.groups || []);
       setHoldings(currentP.holdings || {});
       setPendingTrades(currentP.pendingTrades || []);
 
-      localStorage.setItem('funds', JSON.stringify(dedupedFunds));
+      localStorage.setItem('funds', JSON.stringify(fundsForStorage));
       localStorage.setItem('favorites', JSON.stringify(currentP.favorites || []));
       localStorage.setItem('groups', JSON.stringify(currentP.groups || []));
       localStorage.setItem('holdings', JSON.stringify(currentP.holdings || {}));
@@ -4582,8 +4756,13 @@ export default function HomePage() {
       if (!currentP) return;
 
       const mergedPortfolio = mergeOldDataToPortfolio(currentP, data);
+      const resolvedMerged = resolveFundsWithInfo(mergedPortfolio.funds || []);
+      const cleanedMergedPortfolio = {
+        ...mergedPortfolio,
+        funds: resolvedMerged.cleanedFunds
+      };
       const newPortfolios = portfolios.map(p =>
-        p.id === currentPortfolioId ? mergedPortfolio : p
+        p.id === currentPortfolioId ? cleanedMergedPortfolio : p
       );
 
       const newConfig = {
@@ -4596,14 +4775,15 @@ export default function HomePage() {
       setPortfolios(newPortfolios);
 
       // 更新当前状态
-      const cleanedFunds = sanitizeFunds(mergedPortfolio.funds || []);
+      const cleanedFunds = sanitizeFunds(resolvedMerged.mergedFunds);
+      const fundsForStorage = prepareFundsForStorage(cleanedFunds);
       setFunds(cleanedFunds);
       setFavorites(new Set(mergedPortfolio.favorites || []));
       setGroups(mergedPortfolio.groups || []);
       setHoldings(mergedPortfolio.holdings || {});
       setPendingTrades(mergedPortfolio.pendingTrades || []);
 
-      localStorage.setItem('funds', JSON.stringify(cleanedFunds));
+      localStorage.setItem('funds', JSON.stringify(fundsForStorage));
       localStorage.setItem('favorites', JSON.stringify(mergedPortfolio.favorites || []));
       localStorage.setItem('groups', JSON.stringify(mergedPortfolio.groups || []));
       localStorage.setItem('holdings', JSON.stringify(mergedPortfolio.holdings || {}));
@@ -4631,8 +4811,13 @@ export default function HomePage() {
       startImportProgress();
       const v2Data = migrateToV2(data, portfolioName);
       const newPortfolio = v2Data.portfolios[0];
+      const resolvedNew = resolveFundsWithInfo(newPortfolio.funds || []);
+      const cleanedNewPortfolio = {
+        ...newPortfolio,
+        funds: resolvedNew.cleanedFunds
+      };
 
-      const newPortfolios = [...portfolios, newPortfolio];
+      const newPortfolios = [...portfolios, cleanedNewPortfolio];
       const newConfig = {
         version: 2,
         refreshMs,
@@ -4641,24 +4826,26 @@ export default function HomePage() {
 
       localStorage.setItem('userConfig', JSON.stringify(newConfig));
       setPortfolios(newPortfolios);
-      setCurrentPortfolioId(newPortfolio.id);
-      localStorage.setItem('currentPortfolioId', newPortfolio.id);
+      setCurrentPortfolioId(cleanedNewPortfolio.id);
+      localStorage.setItem('currentPortfolioId', cleanedNewPortfolio.id);
+      activePortfolioIdRef.current = cleanedNewPortfolio.id;
 
       // 切换到新账本
-      const cleanedFunds = sanitizeFunds(newPortfolio.funds || []);
+      const cleanedFunds = sanitizeFunds(resolvedNew.mergedFunds);
+      const fundsForStorage = prepareFundsForStorage(cleanedFunds);
       setFunds(cleanedFunds);
-      setFavorites(new Set(newPortfolio.favorites || []));
-      setGroups(newPortfolio.groups || []);
-      setHoldings(newPortfolio.holdings || {});
-      setPendingTrades(newPortfolio.pendingTrades || []);
+      setFavorites(new Set(cleanedNewPortfolio.favorites || []));
+      setGroups(cleanedNewPortfolio.groups || []);
+      setHoldings(cleanedNewPortfolio.holdings || {});
+      setPendingTrades(cleanedNewPortfolio.pendingTrades || []);
       setCurrentTab('all');
 
-      localStorage.setItem('funds', JSON.stringify(cleanedFunds));
-      localStorage.setItem('favorites', JSON.stringify(newPortfolio.favorites || []));
-      localStorage.setItem('groups', JSON.stringify(newPortfolio.groups || []));
-      localStorage.setItem('collapsedCodes', JSON.stringify(newPortfolio.collapsedCodes || []));
-      localStorage.setItem('holdings', JSON.stringify(newPortfolio.holdings || {}));
-      localStorage.setItem('pendingTrades', JSON.stringify(newPortfolio.pendingTrades || []));
+      localStorage.setItem('funds', JSON.stringify(fundsForStorage));
+      localStorage.setItem('favorites', JSON.stringify(cleanedNewPortfolio.favorites || []));
+      localStorage.setItem('groups', JSON.stringify(cleanedNewPortfolio.groups || []));
+      localStorage.setItem('collapsedCodes', JSON.stringify(cleanedNewPortfolio.collapsedCodes || []));
+      localStorage.setItem('holdings', JSON.stringify(cleanedNewPortfolio.holdings || {}));
+      localStorage.setItem('pendingTrades', JSON.stringify(cleanedNewPortfolio.pendingTrades || []));
 
       const codes = cleanedFunds.map(f => f.code);
       if (codes.length) await refreshAll(codes);
