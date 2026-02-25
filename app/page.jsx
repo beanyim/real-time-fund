@@ -1,19 +1,57 @@
 'use client';
 
-import { useEffect, useRef, useState, useMemo, useLayoutEffect, useCallback } from 'react';
-import { motion, AnimatePresence, Reorder, useDragControls } from 'framer-motion';
-import { createAvatar } from '@dicebear/core';
-import { glass } from '@dicebear/collection';
+import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
+import {AnimatePresence, motion, Reorder, useDragControls} from 'framer-motion';
+import {createAvatar} from '@dicebear/core';
+import {glass} from '@dicebear/collection';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import Announcement from "./components/Announcement";
-import { DatePicker, DonateTabs, NumericInput, Stat } from "./components/Common";
-import { ChevronIcon, CloseIcon, CloudIcon, DragIcon, ExitIcon, EyeIcon, EyeOffIcon, GridIcon, ListIcon, LoginIcon, LogoutIcon, MailIcon, MoveBottomIcon, MoveTopIcon, PinIcon, PinOffIcon, PlusIcon, RefreshIcon, SettingsIcon, SortIcon, StarIcon, TrashIcon, UserIcon } from "./components/Icons";
+import {DatePicker, DonateTabs, NumericInput, Stat} from "./components/Common";
+import {
+    ChevronIcon,
+    CloseIcon,
+    CloudIcon,
+    DragIcon,
+    ExitIcon,
+    EyeIcon,
+    EyeOffIcon,
+    GridIcon,
+    ListIcon,
+    LoginIcon,
+    LogoutIcon,
+    MailIcon,
+    MoveBottomIcon,
+    MoveTopIcon,
+    PinIcon,
+    PinOffIcon,
+    PlusIcon,
+    RefreshIcon,
+    SettingsIcon,
+    SortIcon,
+    StarIcon,
+    TrashIcon,
+    UserIcon
+} from "./components/Icons";
 import weChatGroupImg from "./assets/weChatGroup.png";
-import { supabase, isSupabaseConfigured } from './lib/supabase';
-import { isLegacyData, migrateToV2, createEmptyV2Data, createPortfolio, mergeOldDataToPortfolio, validateV2Data } from './lib/migration';
-import { fetchFundData, fetchFundHoldings, fetchShanghaiIndexDate, fetchSmartFundNetValue, searchFunds, submitFeedback } from './api/fund';
+import {isSupabaseConfigured, supabase} from './lib/supabase';
+import {
+    createEmptyV2Data,
+    createPortfolio,
+    isLegacyData,
+    mergeOldDataToPortfolio,
+    migrateToV2,
+    validateV2Data
+} from './lib/migration';
+import {
+    fetchFundData,
+    fetchFundHoldings,
+    fetchShanghaiIndexDate,
+    fetchSmartFundNetValue,
+    searchFunds,
+    submitFeedback
+} from './api/fund';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -2289,7 +2327,7 @@ export default function HomePage() {
     const portfolio = portfolios.find(p => p.id === resolvedPortfolioId);
     if (!portfolio) return;
     lastPortfolioSwitchAtRef.current = Date.now();
-    
+
     const nextFunds = sanitizeFunds(portfolio.funds || []);
     const nextFavorites = portfolio.favorites || [];
     const nextGroups = portfolio.groups || [];
@@ -2299,6 +2337,7 @@ export default function HomePage() {
 
     setCurrentPortfolioId(resolvedPortfolioId);
     localStorage.setItem('currentPortfolioId', resolvedPortfolioId);
+    activePortfolioIdRef.current = resolvedPortfolioId;
     setFunds(nextFunds);
     setFavorites(new Set(nextFavorites));
     setGroups(nextGroups);
@@ -2311,10 +2350,10 @@ export default function HomePage() {
     localStorage.setItem('groups', JSON.stringify(nextGroups));
     localStorage.setItem('holdings', JSON.stringify(nextHoldings));
     localStorage.setItem('pendingTrades', JSON.stringify(nextPendingTrades));
-    
+
     // 保存到 localStorage
     savePortfoliosToStorage(portfolios);
-    
+
     // 刷新基金数据
     const codes = nextFunds.map(f => f.code);
     if (codes.length) refreshAll(codes);
@@ -2329,7 +2368,7 @@ export default function HomePage() {
   }, [portfolios, currentPortfolioId, savePortfoliosToStorage]);
 
   const renamePortfolio = useCallback((portfolioId, newName) => {
-    const newPortfolios = portfolios.map(p => 
+    const newPortfolios = portfolios.map(p =>
       p.id === portfolioId ? { ...p, name: newName } : p
     );
     setPortfolios(newPortfolios);
@@ -2338,10 +2377,10 @@ export default function HomePage() {
 
   const deletePortfolio = useCallback((portfolioId) => {
     if (portfolios.length <= 1) return; // 至少保留一个账本
-    
+
     const newPortfolios = portfolios.filter(p => p.id !== portfolioId);
     setPortfolios(newPortfolios);
-    
+
     // 如果删除的是当前账本，切换到第一个
     if (portfolioId === currentPortfolioId) {
       const nextPortfolio = newPortfolios[0];
@@ -2362,7 +2401,7 @@ export default function HomePage() {
   // 更新当前账本数据
   const updateCurrentPortfolio = useCallback((updates) => {
     if (!currentPortfolioId) return;
-    const newPortfolios = portfolios.map(p => 
+    const newPortfolios = portfolios.map(p =>
       p.id === currentPortfolioId ? { ...p, ...updates } : p
     );
     setPortfolios(newPortfolios);
@@ -2883,7 +2922,7 @@ export default function HomePage() {
   const storageHelper = useMemo(() => {
     const portfolioKeys = new Set(['funds', 'favorites', 'groups', 'holdings', 'pendingTrades']);
     const userKeys = new Set(['refreshMs']);
-    
+
     const saveToUserConfig = () => {
       try {
         const configStr = localStorage.getItem('userConfig');
@@ -2891,7 +2930,7 @@ export default function HomePage() {
         const config = JSON.parse(configStr);
         if (!config || config.version < 2) return;
         if (!Array.isArray(config.portfolios) || config.portfolios.length === 0) return;
-        
+
         // 更新当前账本数据
         const storedPortfolioId = localStorage.getItem('currentPortfolioId');
         const portfolioId = storedPortfolioId && config.portfolios.some(p => p.id === storedPortfolioId)
@@ -2916,16 +2955,16 @@ export default function HomePage() {
           }
           return p;
         });
-        
+
         // 更新用户级配置
         config.refreshMs = parseInt(localStorage.getItem('refreshMs') || '30000', 10);
-        
+
         localStorage.setItem('userConfig', JSON.stringify(config));
       } catch (e) {
         console.error('保存 userConfig 失败:', e);
       }
     };
-    
+
     const triggerSync = (key, prevValue, nextValue) => {
       if (portfolioKeys.has(key) || userKeys.has(key)) {
         if (key === 'funds') {
@@ -2933,10 +2972,10 @@ export default function HomePage() {
           const nextSig = getFundCodesSignature(nextValue);
           if (prevSig === nextSig) return;
         }
-        
+
         // 同步更新 userConfig
         saveToUserConfig();
-        
+
         if (!skipSyncRef.current) {
           window.localStorage.setItem('localUpdatedAt', nowInTz().toISOString());
         }
@@ -3201,13 +3240,13 @@ export default function HomePage() {
       // 尝试加载 v2 数据结构
       const userConfigStr = localStorage.getItem('userConfig');
       let userConfig = null;
-      
+
       if (userConfigStr) {
         try {
           userConfig = JSON.parse(userConfigStr);
         } catch {}
       }
-      
+
       // 检查是否有 v2 数据
       if (userConfig && userConfig.version >= 2 && Array.isArray(userConfig.portfolios)) {
         // v2 数据结构
@@ -3227,14 +3266,15 @@ export default function HomePage() {
         if (resolvedPortfolioId) {
           setCurrentPortfolioId(resolvedPortfolioId);
           localStorage.setItem('currentPortfolioId', resolvedPortfolioId);
+          activePortfolioIdRef.current = resolvedPortfolioId;
         }
         setRefreshMs(validatedConfig.refreshMs);
         setTempSeconds(Math.round(validatedConfig.refreshMs / 1000));
         const storedViewMode = localStorage.getItem('viewMode') === 'list' ? 'list' : 'card';
         setViewMode(storedViewMode);
-        
+
         // 加载当前账本数据
-        const currentP = cleanedPortfolios.find(p => p.id === resolvedPortfolioId) 
+        const currentP = cleanedPortfolios.find(p => p.id === resolvedPortfolioId)
           || cleanedPortfolios[0];
         if (currentP) {
           const dedupedFunds = sanitizeFunds(currentP.funds || []);
@@ -3243,7 +3283,7 @@ export default function HomePage() {
           setGroups(currentP.groups || []);
           setHoldings(currentP.holdings || {});
           setPendingTrades(currentP.pendingTrades || []);
-          
+
           const codes = dedupedFunds.map(f => f.code);
           if (codes.length) refreshAll(codes);
         }
@@ -3256,10 +3296,10 @@ export default function HomePage() {
         const oldPending = JSON.parse(localStorage.getItem('pendingTrades') || '[]');
         const oldRefreshMs = parseInt(localStorage.getItem('refreshMs') || '30000', 10);
         const oldViewMode = localStorage.getItem('viewMode');
-        
+
         // 检查是否有老数据
         const hasOldData = Array.isArray(oldFunds) && oldFunds.length > 0;
-        
+
         if (hasOldData) {
           // 迁移老数据到 v2 结构
           const oldData = {
@@ -3275,10 +3315,10 @@ export default function HomePage() {
             ...v2Data,
             portfolios: stripHoldingsFromPortfolios(v2Data.portfolios || [])
           };
-          
+
           // 保存 v2 数据
           localStorage.setItem('userConfig', JSON.stringify(cleanedV2Data));
-          
+
           // 设置状态
           setPortfolios(cleanedV2Data.portfolios);
           const resolvedPortfolioId = cleanedV2Data.portfolios[0]?.id;
@@ -3291,7 +3331,7 @@ export default function HomePage() {
           const resolvedViewMode = oldViewMode === 'list' ? 'list' : 'card';
           setViewMode(resolvedViewMode);
           localStorage.setItem('viewMode', resolvedViewMode);
-          
+
           const currentP = cleanedV2Data.portfolios[0];
           const dedupedFunds = sanitizeFunds(currentP.funds);
           setFunds(dedupedFunds);
@@ -3299,7 +3339,7 @@ export default function HomePage() {
           setGroups(currentP.groups);
           setHoldings(currentP.holdings);
           setPendingTrades(currentP.pendingTrades);
-          
+
           const codes = dedupedFunds.map(f => f.code);
           if (codes.length) refreshAll(codes);
         } else {
@@ -3883,7 +3923,7 @@ export default function HomePage() {
 
   function getComparablePayload(payload) {
     if (!payload || typeof payload !== 'object') return '';
-    
+
     // 支持 v2 多账本数据结构
     if (payload.version >= 2 && Array.isArray(payload.portfolios)) {
       const portfoliosComparable = payload.portfolios.map(p => {
@@ -3900,19 +3940,19 @@ export default function HomePage() {
           return acc;
         }, []);
         const uniqueFundCodes = orderedFundCodes;
-        
+
         return {
           id: p.id,
           name: p.name,
           funds: orderedFundCodes,
-          favorites: Array.isArray(p.favorites) 
+          favorites: Array.isArray(p.favorites)
             ? Array.from(new Set(p.favorites.map(normalizeCode).filter(c => uniqueFundCodes.includes(c)))).sort()
             : [],
           groups: Array.isArray(p.groups)
             ? p.groups.map(g => ({
                 id: normalizeCode(g?.id),
                 name: g?.name || '',
-                codes: Array.isArray(g?.codes) 
+                codes: Array.isArray(g?.codes)
                   ? Array.from(new Set(g.codes.map(normalizeCode).filter(c => uniqueFundCodes.includes(c)))).sort()
                   : []
               })).filter(g => g.id).sort((a, b) => a.id.localeCompare(b.id))
@@ -3945,14 +3985,14 @@ export default function HomePage() {
             : []
         };
       }).sort((a, b) => a.id.localeCompare(b.id));
-      
+
       return JSON.stringify({
         version: 2,
         refreshMs: Number.isFinite(payload.refreshMs) ? payload.refreshMs : 30000,
         portfolios: portfoliosComparable
       });
     }
-    
+
     // 兼容老数据结构 (v1)
     const rawFunds = Array.isArray(payload.funds) ? payload.funds : [];
     const orderedFundEntries = rawFunds
@@ -4053,7 +4093,7 @@ export default function HomePage() {
           };
         }
       }
-      
+
       // 降级到老数据结构
       const funds = stripHoldingsFromFunds(JSON.parse(localStorage.getItem('funds') || '[]'));
       const favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
@@ -4135,7 +4175,7 @@ export default function HomePage() {
       const now = Date.now();
       const recentSwitchThresholdMs = 5000;
       const shouldPreserveCurrentPortfolio = now - lastPortfolioSwitchAtRef.current <= recentSwitchThresholdMs;
-      
+
       // 检查是否为 v2 多账本数据结构
       if (cloudData.version >= 2 && Array.isArray(cloudData.portfolios)) {
         // v2 数据结构
@@ -4149,23 +4189,24 @@ export default function HomePage() {
             ? storedPortfolioId
             : cleanedPortfolios[0]?.id);
         const cleanedConfig = { ...validatedConfig, portfolios: cleanedPortfolios };
-        
+
         // 保存到 localStorage
         localStorage.setItem('userConfig', JSON.stringify(cleanedConfig));
-        
+
         // 更新状态
         setPortfolios(cleanedPortfolios);
         if (resolvedCurrentId) {
           setCurrentPortfolioId(resolvedCurrentId);
           localStorage.setItem('currentPortfolioId', resolvedCurrentId);
+          activePortfolioIdRef.current = resolvedCurrentId;
         }
         setRefreshMs(cleanedConfig.refreshMs);
         setTempSeconds(Math.round(cleanedConfig.refreshMs / 1000));
         const storedViewMode = localStorage.getItem('viewMode') === 'list' ? 'list' : 'card';
         setViewMode(storedViewMode);
-        
+
         // 加载当前账本数据
-        const currentP = cleanedPortfolios.find(p => p.id === resolvedCurrentId) 
+        const currentP = cleanedPortfolios.find(p => p.id === resolvedCurrentId)
           || cleanedPortfolios[0];
         if (currentP) {
           const dedupedFunds = sanitizeFunds(currentP.funds || []);
@@ -4174,7 +4215,7 @@ export default function HomePage() {
           setGroups(currentP.groups || []);
           setHoldings(currentP.holdings || {});
           setPendingTrades(currentP.pendingTrades || []);
-          
+
           // 同步到老的 localStorage keys（兼容）
           localStorage.setItem('funds', JSON.stringify(dedupedFunds));
           localStorage.setItem('favorites', JSON.stringify(currentP.favorites || []));
@@ -4182,7 +4223,7 @@ export default function HomePage() {
           localStorage.setItem('holdings', JSON.stringify(currentP.holdings || {}));
           localStorage.setItem('pendingTrades', JSON.stringify(currentP.pendingTrades || []));
           localStorage.setItem('refreshMs', String(cleanedConfig.refreshMs));
-          
+
           const codes = dedupedFunds.map(f => f.code);
           if (codes.length) await refreshAll(codes);
         }
@@ -4190,14 +4231,14 @@ export default function HomePage() {
         // 老数据结构 (v1) - 迁移为 v2
         const v2Data = migrateToV2(cloudData, '默认账本');
         localStorage.setItem('userConfig', JSON.stringify(v2Data));
-        
+
         setPortfolios(v2Data.portfolios);
         const resolvedPortfolioId = v2Data.portfolios[0]?.id;
         if (resolvedPortfolioId) {
           setCurrentPortfolioId(resolvedPortfolioId);
           localStorage.setItem('currentPortfolioId', resolvedPortfolioId);
         }
-        
+
         const nextFunds = Array.isArray(cloudData.funds) ? sanitizeFunds(cloudData.funds) : [];
         setFunds(nextFunds);
         localStorage.setItem('funds', JSON.stringify(nextFunds));
@@ -4389,7 +4430,7 @@ export default function HomePage() {
       // 导出 v2 多账本数据结构
       const userConfigStr = localStorage.getItem('userConfig');
       let payload;
-      
+
       if (userConfigStr) {
         try {
           const userConfig = JSON.parse(userConfigStr);
@@ -4401,7 +4442,7 @@ export default function HomePage() {
           }
         } catch {}
       }
-      
+
       // 如果没有 v2 数据，降级到老格式
       if (!payload) {
         payload = {
@@ -4415,7 +4456,7 @@ export default function HomePage() {
           exportedAt: nowInTz().toISOString()
         };
       }
-      
+
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       if (window.showSaveFilePicker) {
         const handle = await window.showSaveFilePicker({
@@ -4520,13 +4561,13 @@ export default function HomePage() {
       setGroups(currentP.groups || []);
       setHoldings(currentP.holdings || {});
       setPendingTrades(currentP.pendingTrades || []);
-      
+
       localStorage.setItem('funds', JSON.stringify(dedupedFunds));
       localStorage.setItem('favorites', JSON.stringify(currentP.favorites || []));
       localStorage.setItem('groups', JSON.stringify(currentP.groups || []));
       localStorage.setItem('holdings', JSON.stringify(currentP.holdings || {}));
       localStorage.setItem('pendingTrades', JSON.stringify(currentP.pendingTrades || []));
-      
+
       const codes = dedupedFunds.map(f => f.code);
       if (codes.length) await refreshAll(codes);
     }
@@ -4539,21 +4580,21 @@ export default function HomePage() {
       startImportProgress();
       const currentP = portfolios.find(p => p.id === currentPortfolioId);
       if (!currentP) return;
-      
+
       const mergedPortfolio = mergeOldDataToPortfolio(currentP, data);
-      const newPortfolios = portfolios.map(p => 
+      const newPortfolios = portfolios.map(p =>
         p.id === currentPortfolioId ? mergedPortfolio : p
       );
-      
+
       const newConfig = {
         version: 2,
         refreshMs,
         portfolios: newPortfolios
       };
-      
+
       localStorage.setItem('userConfig', JSON.stringify(newConfig));
       setPortfolios(newPortfolios);
-      
+
       // 更新当前状态
       const cleanedFunds = sanitizeFunds(mergedPortfolio.funds || []);
       setFunds(cleanedFunds);
@@ -4561,16 +4602,16 @@ export default function HomePage() {
       setGroups(mergedPortfolio.groups || []);
       setHoldings(mergedPortfolio.holdings || {});
       setPendingTrades(mergedPortfolio.pendingTrades || []);
-      
+
       localStorage.setItem('funds', JSON.stringify(cleanedFunds));
       localStorage.setItem('favorites', JSON.stringify(mergedPortfolio.favorites || []));
       localStorage.setItem('groups', JSON.stringify(mergedPortfolio.groups || []));
       localStorage.setItem('holdings', JSON.stringify(mergedPortfolio.holdings || {}));
       localStorage.setItem('pendingTrades', JSON.stringify(mergedPortfolio.pendingTrades || []));
-      
+
       const codes = cleanedFunds.map(f => f.code);
       if (codes.length) await refreshAll(codes);
-      
+
       await finishImportProgress();
       setImportChoiceModal({ open: false, data: null });
       setSuccessModal({ open: true, message: '导入成功' });
@@ -4590,19 +4631,19 @@ export default function HomePage() {
       startImportProgress();
       const v2Data = migrateToV2(data, portfolioName);
       const newPortfolio = v2Data.portfolios[0];
-      
+
       const newPortfolios = [...portfolios, newPortfolio];
       const newConfig = {
         version: 2,
         refreshMs,
         portfolios: newPortfolios
       };
-      
+
       localStorage.setItem('userConfig', JSON.stringify(newConfig));
       setPortfolios(newPortfolios);
       setCurrentPortfolioId(newPortfolio.id);
       localStorage.setItem('currentPortfolioId', newPortfolio.id);
-      
+
       // 切换到新账本
       const cleanedFunds = sanitizeFunds(newPortfolio.funds || []);
       setFunds(cleanedFunds);
@@ -4611,17 +4652,17 @@ export default function HomePage() {
       setHoldings(newPortfolio.holdings || {});
       setPendingTrades(newPortfolio.pendingTrades || []);
       setCurrentTab('all');
-      
+
       localStorage.setItem('funds', JSON.stringify(cleanedFunds));
       localStorage.setItem('favorites', JSON.stringify(newPortfolio.favorites || []));
       localStorage.setItem('groups', JSON.stringify(newPortfolio.groups || []));
       localStorage.setItem('collapsedCodes', JSON.stringify(newPortfolio.collapsedCodes || []));
       localStorage.setItem('holdings', JSON.stringify(newPortfolio.holdings || {}));
       localStorage.setItem('pendingTrades', JSON.stringify(newPortfolio.pendingTrades || []));
-      
+
       const codes = cleanedFunds.map(f => f.code);
       if (codes.length) await refreshAll(codes);
-      
+
       await finishImportProgress();
       setImportChoiceModal({ open: false, data: null });
       setSuccessModal({ open: true, message: `已创建新账本"${portfolioName}"并导入数据` });
@@ -5016,8 +5057,8 @@ export default function HomePage() {
         <div className="col-12">
           {/* 账本选择器 */}
           <div className="portfolio-selector" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div 
-              className="portfolio-dropdown-wrapper" 
+            <div
+              className="portfolio-dropdown-wrapper"
               ref={portfolioDropdownRef}
               style={{ position: 'relative' }}
             >
@@ -5039,16 +5080,16 @@ export default function HomePage() {
               >
                 <span style={{ fontSize: 16 }}>📚</span>
                 <span>{currentPortfolio?.name || '默认账本'}</span>
-                <ChevronIcon 
-                  width="14" 
-                  height="14" 
-                  style={{ 
+                <ChevronIcon
+                  width="14"
+                  height="14"
+                  style={{
                     transform: portfolioDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)',
                     transition: 'transform 0.2s'
-                  }} 
+                  }}
                 />
               </button>
-              
+
               <AnimatePresence>
                 {portfolioDropdownOpen && (
                   <motion.div
@@ -6143,8 +6184,8 @@ export default function HomePage() {
                 className="button"
                 onClick={() => {
                   setNewPortfolioName('新账本');
-                  setNewPortfolioModal({ 
-                    open: true, 
+                  setNewPortfolioModal({
+                    open: true,
                     callback: (name) => {
                       addPortfolio(name);
                     }
@@ -6186,9 +6227,9 @@ export default function HomePage() {
                   <span style={{ fontSize: 20 }}>📥</span>
                   <span>检测到旧版数据</span>
                 </div>
-                <button 
-                  className="icon-button" 
-                  onClick={() => setImportChoiceModal({ open: false, data: null })} 
+                <button
+                  className="icon-button"
+                  onClick={() => setImportChoiceModal({ open: false, data: null })}
                   style={{ border: 'none', background: 'transparent' }}
                 >
                   <CloseIcon width="20" height="20" />
@@ -6254,9 +6295,9 @@ export default function HomePage() {
                   <PlusIcon width="20" height="20" />
                   <span>新建账本</span>
                 </div>
-                <button 
-                  className="icon-button" 
-                  onClick={() => setNewPortfolioModal({ open: false, callback: null })} 
+                <button
+                  className="icon-button"
+                  onClick={() => setNewPortfolioModal({ open: false, callback: null })}
                   style={{ border: 'none', background: 'transparent' }}
                 >
                   <CloseIcon width="20" height="20" />
@@ -6341,9 +6382,9 @@ export default function HomePage() {
                   <TrashIcon width="20" height="20" style={{ color: 'var(--danger)' }} />
                   <span>删除账本</span>
                 </div>
-                <button 
-                  className="icon-button" 
-                  onClick={() => setDeletePortfolioConfirm(null)} 
+                <button
+                  className="icon-button"
+                  onClick={() => setDeletePortfolioConfirm(null)}
                   style={{ border: 'none', background: 'transparent' }}
                 >
                   <CloseIcon width="20" height="20" />
