@@ -4279,7 +4279,6 @@ export default function HomePage() {
           return;
         }
 
-        await applyCloudConfig(data.data, data.updated_at);
         return;
       }
       setCloudConfigModal({ open: true, userId, type: 'empty' });
