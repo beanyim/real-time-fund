@@ -892,9 +892,35 @@ input[type="number"] {
   box-shadow: 0 0 0 3px rgba(96,165,250,0.15);
   cursor: default;
 }
+.refresh-countdown-btn {
+  position: relative;
+  isolation: isolate;
+  --refresh-progress: 0;
+}
+
+.refresh-countdown-btn::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  padding: 1.5px;
+  background: conic-gradient(from -90deg, var(--accent) calc(var(--refresh-progress) * 1turn), rgba(255,255,255,0.18) 0);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  transition: background 120ms linear;
+  z-index: 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .spin {
     animation: none;
+  }
+
+  .refresh-countdown-btn::before {
+    transition: none;
   }
 }
 

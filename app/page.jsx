@@ -2199,6 +2199,8 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const timerRef = useRef(null);
+  const countdownTimerRef = useRef(null);
+  const nextRefreshAtRef = useRef(Date.now());
   const refreshingRef = useRef(false);
   const isLoggingOutRef = useRef(false);
 
@@ -2642,6 +2644,21 @@ export default function HomePage() {
 
 
   // 自动滚动选中 Tab 到可视区域
+  const [remainingMs, setRemainingMs] = useState(refreshMs);
+  const refreshProgress = funds.length === 0
+    ? 0
+    : (refreshing ? 1 : Math.min(1, Math.max(0, (refreshMs - remainingMs) / refreshMs)));
+
+  const resetRefreshCountdown = useCallback(() => {
+    const now = Date.now();
+    nextRefreshAtRef.current = now + refreshMs;
+    setRemainingMs(refreshMs);
+  }, [refreshMs]);
+
+  useEffect(() => {
+    setRemainingMs(refreshMs);
+  }, [refreshMs]);
+
   useEffect(() => {
     if (!tabsRef.current) return;
     if (currentTab === 'all') {
@@ -3771,14 +3788,31 @@ export default function HomePage() {
 
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current);
+    if (countdownTimerRef.current) cancelAnimationFrame(countdownTimerRef.current);
+
+    resetRefreshCountdown();
+
     timerRef.current = setInterval(() => {
       const codes = Array.from(new Set(funds.map((f) => f.code)));
-      if (codes.length) refreshAll(codes);
+      if (codes.length) {
+        resetRefreshCountdown();
+        refreshAll(codes);
+      }
     }, refreshMs);
+
+    const tick = () => {
+      const remainMs = Math.max(0, nextRefreshAtRef.current - Date.now());
+      setRemainingMs(remainMs);
+      countdownTimerRef.current = requestAnimationFrame(tick);
+    };
+
+    countdownTimerRef.current = requestAnimationFrame(tick);
+
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      if (countdownTimerRef.current) cancelAnimationFrame(countdownTimerRef.current);
     };
-  }, [funds, refreshMs]);
+  }, [funds, refreshMs, resetRefreshCountdown]);
 
   const performSearch = async (val) => {
     if (!val.trim()) {
@@ -4022,6 +4056,7 @@ export default function HomePage() {
     if (refreshingRef.current) return;
     const codes = Array.from(new Set(funds.map((f) => f.code)));
     if (!codes.length) return;
+    resetRefreshCountdown();
     await refreshAll(codes);
   };
 
@@ -4992,7 +5027,6 @@ export default function HomePage() {
         </div>
       )}
       <div className="navbar glass">
-        {refreshing && <div className="loading-bar"></div>}
         <div className="brand">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
             <circle cx="12" cy="12" r="10" stroke="var(--accent)" strokeWidth="2" />
@@ -5035,12 +5069,13 @@ export default function HomePage() {
             <strong>{Math.round(refreshMs / 1000)}秒</strong>
           </div>
           <button
-            className="icon-button"
+            className="icon-button refresh-countdown-btn"
             aria-label="立即刷新"
             onClick={manualRefresh}
             disabled={refreshing || funds.length === 0}
             aria-busy={refreshing}
-            title="立即刷新"
+            title={refreshing ? '刷新中...' : '立即刷新'}
+            style={{ '--refresh-progress': `${refreshProgress}` }}
           >
             <RefreshIcon className={refreshing ? 'spin' : ''} width="18" height="18" />
           </button>
