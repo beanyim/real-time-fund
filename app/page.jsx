@@ -268,7 +268,7 @@ function TopHoldingsModal({ fund, items, loading, error, onClose, onRetry }) {
   );
 }
 
-function PendingTradesModal({ pendingTrades = [], onClose }) {
+function PendingTradesModal({ pendingTrades = [], onClose, onRevoke }) {
   return (
     <motion.div
       className="modal-overlay"
@@ -328,6 +328,25 @@ function PendingTradesModal({ pendingTrades = [], onClose }) {
                   <div>交易日期：{trade.date || '--'}{trade.isAfter3pm ? '（15:00后，顺延）' : ''}</div>
                   <div>ID：{trade.id || '--'}</div>
                   <div>时间戳：{trade.timestamp || '--'}</div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                  <button
+                    className="button"
+                    onClick={() => onRevoke?.(trade.id)}
+                    style={{
+                      height: 30,
+                      padding: '0 12px',
+                      borderRadius: 8,
+                      fontSize: 12,
+                      border: 'none',
+                      background: 'linear-gradient(180deg, #ef4444, #f87171)',
+                      color: '#2b0b0b',
+                      fontWeight: 700,
+                      boxShadow: '0 8px 14px rgba(248, 113, 113, 0.25)'
+                    }}
+                  >
+                    撤销交易
+                  </button>
                 </div>
               </div>
             ))}
@@ -2426,13 +2445,10 @@ export default function HomePage() {
     localStorage.setItem('holdings', JSON.stringify(nextHoldings));
     localStorage.setItem('pendingTrades', JSON.stringify(nextPendingTrades));
 
-    // 保存到 localStorage
-    savePortfoliosToStorage(portfolios);
-
     // 刷新基金数据
     const codes = nextFunds.map(f => f.code);
     if (codes.length) refreshAll(codes);
-  }, [portfolios, currentPortfolioId, savePortfoliosToStorage]);
+  }, [portfolios, currentPortfolioId]);
 
   const addPortfolio = useCallback((name) => {
     const newPortfolio = createPortfolio(name || '新账本');
@@ -2888,6 +2904,7 @@ export default function HomePage() {
         const next = [...pendingTrades, pending];
         setPendingTrades(next);
         storageHelper.setItem('pendingTrades', JSON.stringify(next));
+        updateCurrentPortfolio({ pendingTrades: next });
 
         setTradeModal({ open: false, fund: null, type: 'buy' });
         showToast('净值暂未更新，已加入待处理队列', 'info');
@@ -5010,6 +5027,7 @@ export default function HomePage() {
       !!fundDeleteConfirm ||
       weChatOpen ||
       portfolioModalOpen ||
+      pendingQueueModalOpen ||
       importChoiceModal.open ||
       newPortfolioModal.open ||
       !!deletePortfolioConfirm;
@@ -5048,6 +5066,7 @@ export default function HomePage() {
     donateOpen,
     weChatOpen,
     portfolioModalOpen,
+    pendingQueueModalOpen,
     importChoiceModal.open,
     newPortfolioModal.open,
     deletePortfolioConfirm
@@ -5482,7 +5501,7 @@ export default function HomePage() {
               <SettingsIcon width="20" height="20" />
             </button>
             <button
-              className="button secondary pending-queue-button"
+              className="button pending-queue-button"
               onClick={() => setPendingQueueModalOpen(true)}
               title="查看待交易队列"
               style={{
@@ -5493,9 +5512,10 @@ export default function HomePage() {
                 alignItems: 'center',
                 gap: 8,
                 position: 'relative',
-                background: 'rgba(96, 165, 250, 0.12)',
-                border: '1px solid rgba(96, 165, 250, 0.35)',
-                color: 'var(--accent)',
+                border: 'none',
+                background: 'var(--primary)',
+                color: '#05263b',
+                boxShadow: '0 10px 18px rgba(var(--primary-rgb), 0.25)',
                 fontWeight: 600
               }}
             >
@@ -6398,6 +6418,15 @@ export default function HomePage() {
         {pendingQueueModalOpen && (
           <PendingTradesModal
             pendingTrades={pendingTrades}
+            onRevoke={(id) => {
+              setPendingTrades(prev => {
+                const next = prev.filter(t => t.id !== id);
+                storageHelper.setItem('pendingTrades', JSON.stringify(next));
+                updateCurrentPortfolio({ pendingTrades: next });
+                return next;
+              });
+              showToast('已撤销待处理交易', 'success');
+            }}
             onClose={() => setPendingQueueModalOpen(false)}
           />
         )}
