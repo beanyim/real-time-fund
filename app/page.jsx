@@ -2257,6 +2257,7 @@ export default function HomePage() {
   const [searchResults, setSearchResults] = useState([]);
   const [selectedFunds, setSelectedFunds] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [fundFilterTerm, setFundFilterTerm] = useState('');
   const searchTimeoutRef = useRef(null);
   const dropdownRef = useRef(null);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -2599,12 +2600,19 @@ export default function HomePage() {
   };
 
   // 过滤和排序后的基金列表
+  const filterText = fundFilterTerm.trim().toLowerCase();
   const displayFunds = funds
     .filter(f => {
       if (currentTab === 'all') return true;
       if (currentTab === 'fav') return favorites.has(f.code);
       const group = groups.find(g => g.id === currentTab);
       return group ? group.codes.includes(f.code) : true;
+    })
+    .filter(f => {
+      if (!filterText) return true;
+      const name = String(f.name || '').toLowerCase();
+      const code = String(f.code || '').toLowerCase();
+      return name.includes(filterText) || code.includes(filterText);
     })
     .sort((a, b) => {
       if (sortBy === 'default') {
@@ -5433,6 +5441,41 @@ export default function HomePage() {
             </div>
 
             <div className="sort-group" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div className="fund-filter" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                  <input
+                    className="input"
+                    placeholder="筛选基金名称或代码..."
+                    value={fundFilterTerm}
+                    onChange={(e) => setFundFilterTerm(e.target.value)}
+                    style={{ height: '32px', minWidth: 180, paddingRight: 28 }}
+                  />
+                {fundFilterTerm.trim() && (
+                  <button
+                    className="icon-button"
+                    type="button"
+                    onClick={() => setFundFilterTerm('')}
+                    title="清空筛选"
+                    style={{
+                      position: 'absolute',
+                      right: 4,
+                      width: 22,
+                      height: 22,
+                      borderRadius: '50%',
+                      background: 'rgba(255,255,255,0.18)',
+                      border: '1px solid rgba(255,255,255,0.28)',
+                      color: 'var(--text)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <CloseIcon width="12" height="12" />
+                  </button>
+                )}
+                </div>
+              </div>
               <div className="view-toggle" style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', padding: '2px' }}>
                 <button
                   className={`icon-button ${viewMode === 'card' ? 'active' : ''}`}
