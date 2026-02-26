@@ -2378,6 +2378,7 @@ export default function HomePage() {
   const holdingsRef = useRef(holdings);
   const pendingTradesRef = useRef(pendingTrades);
   const activePortfolioIdRef = useRef(null);
+  const refreshRunIdRef = useRef(0);
   const portfolioDropdownRef = useRef(null);
   const newPortfolioInputRef = useRef(null);
   const topHoldingsRequestRef = useRef(0);
@@ -2419,6 +2420,7 @@ export default function HomePage() {
     const portfolio = portfolios.find(p => p.id === resolvedPortfolioId);
     if (!portfolio) return;
     lastPortfolioSwitchAtRef.current = Date.now();
+    refreshRunIdRef.current += 1;
 
     const { mergedFunds } = resolveFundsWithInfo(portfolio.funds || []);
     const nextFunds = sanitizeFunds(mergedFunds);
@@ -2496,13 +2498,15 @@ export default function HomePage() {
 
   // 更新当前账本数据
   const updateCurrentPortfolio = useCallback((updates) => {
-    if (!currentPortfolioId) return;
-    const newPortfolios = portfolios.map(p =>
-      p.id === currentPortfolioId ? { ...p, ...updates } : p
-    );
-    setPortfolios(newPortfolios);
-    savePortfoliosToStorage(newPortfolios);
-  }, [portfolios, currentPortfolioId, savePortfoliosToStorage]);
+    if (!activePortfolioIdRef.current) return;
+    setPortfolios((prevPortfolios) => {
+      const newPortfolios = prevPortfolios.map((p) =>
+        p.id === activePortfolioIdRef.current ? { ...p, ...updates } : p
+      );
+      savePortfoliosToStorage(newPortfolios);
+      return newPortfolios;
+    });
+  }, [savePortfoliosToStorage]);
 
   // 点击外部关闭账本下拉菜单
   useEffect(() => {
@@ -2868,16 +2872,12 @@ export default function HomePage() {
     }
 
     if (stateChanged) {
+      const nextPending = currentPending.filter(t => !processedIds.has(t.id));
       setHoldings(tempHoldings);
+      setPendingTrades(nextPending);
       storageHelper.setItem('holdings', JSON.stringify(tempHoldings));
-      updateCurrentPortfolio({ holdings: tempHoldings });
-
-      setPendingTrades(prev => {
-          const next = prev.filter(t => !processedIds.has(t.id));
-          storageHelper.setItem('pendingTrades', JSON.stringify(next));
-          updateCurrentPortfolio({ pendingTrades: next });
-          return next;
-      });
+      storageHelper.setItem('pendingTrades', JSON.stringify(nextPending));
+      updateCurrentPortfolio({ holdings: tempHoldings, pendingTrades: nextPending });
 
       showToast(`已处理 ${processedIds.size} 笔待定交易`, 'success');
     }
@@ -3988,6 +3988,8 @@ export default function HomePage() {
 
   const refreshAll = async (codes) => {
     if (refreshingRef.current) return;
+    const refreshRunId = refreshRunIdRef.current + 1;
+    refreshRunIdRef.current = refreshRunId;
     refreshingRef.current = true;
     setRefreshing(true);
     const currentPortfolioIdAtStart = activePortfolioIdRef.current;
@@ -3995,8 +3997,10 @@ export default function HomePage() {
     try {
       const updated = [];
       for (const c of uniqueCodes) {
+        if (refreshRunIdRef.current !== refreshRunId) break;
         try {
           const data = await fetchFundData(c);
+          if (refreshRunIdRef.current !== refreshRunId) break;
           updated.push(data);
         } catch (e) {
           console.error(`刷新基金 ${c} 失败`, e);
@@ -4009,7 +4013,11 @@ export default function HomePage() {
         }
       }
 
-      if (updated.length > 0 && activePortfolioIdRef.current === currentPortfolioIdAtStart) {
+      if (
+        refreshRunIdRef.current === refreshRunId
+        && updated.length > 0
+        && activePortfolioIdRef.current === currentPortfolioIdAtStart
+      ) {
         const infoMap = updateFundsInfoFromList(updated);
         setFunds(prev => {
           // 将更新后的数据合并回当前最新的 state 中，防止覆盖掉刚刚导入的数据
@@ -4032,8 +4040,13 @@ export default function HomePage() {
     } catch (e) {
       console.error(e);
     } finally {
-      refreshingRef.current = false;
-      setRefreshing(false);
+      const isCurrentRun = refreshRunIdRef.current === refreshRunId;
+      const shouldProcessPending = isCurrentRun && activePortfolioIdRef.current === currentPortfolioIdAtStart;
+      if (isCurrentRun) {
+        refreshingRef.current = false;
+        setRefreshing(false);
+      }
+      if (!shouldProcessPending) return;
       try {
         await processPendingQueue();
       }catch (e) {
