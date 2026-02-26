@@ -905,7 +905,8 @@ input[type="number"] {
   border-radius: inherit;
   pointer-events: none;
   padding: 2.5px;
-  background: conic-gradient(from -90deg, rgba(34, 211, 238, 0.95) calc(var(--refresh-progress) * 1turn), rgba(255,255,255,0.28) 0);
+  background: conic-gradient(from -90deg, rgba(34, 211, 238, 0.98) calc(var(--refresh-progress) * 1turn), rgba(255,255,255,0.3) 0);
+  filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.45));
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
