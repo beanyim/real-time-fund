@@ -5363,8 +5363,15 @@ export default function HomePage() {
             </button>
           </div>
 
-          <div className="filter-bar" style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-            <div className="tabs-container">
+          <div className="filter-bar" style={{
+            marginBottom: 8,
+            display: 'flex',
+            justifyContent: isMobile ? 'flex-start' : 'space-between',
+            alignItems: isMobile ? 'stretch' : 'center',
+            flexWrap: 'wrap',
+            gap: 12
+          }}>
+            <div className="tabs-container" style={isMobile ? { width: '100%' } : undefined}>
               <div
                 className="tabs-scroll-area"
                 data-mask-left={canLeft}
@@ -5440,15 +5447,26 @@ export default function HomePage() {
               </button>
             </div>
 
-            <div className="sort-group" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div className="fund-filter" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <div className="sort-group" style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              width: isMobile ? '100%' : 'auto',
+              flexWrap: isMobile ? 'wrap' : 'nowrap'
+            }}>
+              <div className="fund-filter" style={{ display: 'flex', alignItems: 'center', gap: 8, flex: isMobile ? '1 1 100%' : '0 0 auto', minWidth: isMobile ? 0 : undefined }}>
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', width: isMobile ? '100%' : 'auto' }}>
                   <input
                     className="input"
                     placeholder="筛选基金名称或代码..."
                     value={fundFilterTerm}
                     onChange={(e) => setFundFilterTerm(e.target.value)}
-                    style={{ height: '32px', minWidth: 180, paddingRight: 28 }}
+                    style={{
+                      height: '32px',
+                      minWidth: isMobile ? 0 : 180,
+                      width: isMobile ? '100%' : 'auto',
+                      paddingRight: 28
+                    }}
                   />
                 {fundFilterTerm.trim() && (
                   <button
