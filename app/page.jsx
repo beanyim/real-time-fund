@@ -268,6 +268,76 @@ function TopHoldingsModal({ fund, items, loading, error, onClose, onRetry }) {
   );
 }
 
+function PendingTradesModal({ pendingTrades = [], onClose }) {
+  return (
+    <motion.div
+      className="modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="待交易队列"
+      onClick={onClose}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 20 }}
+        className="glass card modal"
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: 560 }}
+      >
+        <div className="title" style={{ marginBottom: 16, justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 20 }}>🧾</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span>待交易队列</span>
+              <span className="muted" style={{ fontSize: 12 }}>共 {pendingTrades.length} 条</span>
+            </div>
+          </div>
+          <button className="icon-button" onClick={onClose} style={{ border: 'none', background: 'transparent' }}>
+            <CloseIcon width="20" height="20" />
+          </button>
+        </div>
+
+        {pendingTrades.length === 0 ? (
+          <div className="muted" style={{ textAlign: 'center', padding: '24px 0' }}>当前无待交易数据</div>
+        ) : (
+          <div style={{ maxHeight: 420, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {pendingTrades.map((trade, idx) => (
+              <div
+                key={trade.id || `${trade.fundCode}-${trade.timestamp || idx}`}
+                style={{
+                  border: '1px solid var(--border)',
+                  borderRadius: 10,
+                  padding: '10px 12px',
+                  background: 'rgba(255,255,255,0.03)'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <span style={{ fontWeight: 700 }}>{trade.fundName || trade.fundCode || '未知基金'}</span>
+                  <span className={`badge ${trade.type === 'buy' ? 'up' : trade.type === 'sell' ? 'down' : ''}`}>
+                    {trade.type === 'buy' ? '加仓' : trade.type === 'sell' ? '减仓' : (trade.type || '--')}
+                  </span>
+                </div>
+                <div className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>
+                  <div>基金代码：{trade.fundCode || '--'}</div>
+                  <div>份额：{trade.share ?? '--'} ｜ 金额：{trade.amount ?? '--'}</div>
+                  <div>费用模式：{trade.feeMode || '--'} ｜ 费率/费用：{trade.feeValue ?? trade.feeRate ?? '--'}</div>
+                  <div>交易日期：{trade.date || '--'}{trade.isAfter3pm ? '（15:00后，顺延）' : ''}</div>
+                  <div>ID：{trade.id || '--'}</div>
+                  <div>时间戳：{trade.timestamp || '--'}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </motion.div>
+    </motion.div>
+  );
+}
+
 function WeChatModal({ onClose }) {
   return (
     <motion.div
@@ -2222,7 +2292,7 @@ export default function HomePage() {
   const [editingGroup, setEditingGroup] = useState(null);
 
   // 排序状态
-  const [sortBy, setSortBy] = useState('default'); // default, name, yield, holding
+  const [sortBy, setSortBy] = useState('default'); // default, name, yield, holding, holdingRate
   const [sortOrder, setSortOrder] = useState('desc'); // asc | desc
   const [sortManageOpen, setSortManageOpen] = useState(false);
   const [sortBadgeHover, setSortBadgeHover] = useState(false);
@@ -2273,12 +2343,12 @@ export default function HomePage() {
   const [donateOpen, setDonateOpen] = useState(false);
   const [holdings, setHoldings] = useState({}); // { [code]: { share: number, cost: number } }
   const [pendingTrades, setPendingTrades] = useState([]); // [{ id, fundCode, share, date, ... }]
-  const [percentModes, setPercentModes] = useState({}); // { [code]: boolean }
 
   // 多账本状态
   const [portfolios, setPortfolios] = useState([]); // 账本列表
   const [currentPortfolioId, setCurrentPortfolioId] = useState(null); // 当前账本ID
   const [portfolioModalOpen, setPortfolioModalOpen] = useState(false); // 账本管理弹窗
+  const [pendingQueueModalOpen, setPendingQueueModalOpen] = useState(false); // 待交易队列弹窗
   const [portfolioDropdownOpen, setPortfolioDropdownOpen] = useState(false); // 账本下拉菜单
   const [editingPortfolio, setEditingPortfolio] = useState(null); // 正在编辑的账本
   const [importChoiceModal, setImportChoiceModal] = useState({ open: false, data: null }); // 导入选择弹窗
@@ -2631,6 +2701,21 @@ export default function HomePage() {
         const valA = pa?.profitTotal ?? Number.NEGATIVE_INFINITY;
         const valB = pb?.profitTotal ?? Number.NEGATIVE_INFINITY;
         return sortOrder === 'asc' ? valA - valB : valB - valA;
+      }
+      if (sortBy === 'holdingRate') {
+        const holdingA = holdings[a.code];
+        const holdingB = holdings[b.code];
+        const pa = getHoldingProfit(a, holdingA);
+        const pb = getHoldingProfit(b, holdingB);
+        const investedA = (holdingA?.cost || 0) * (holdingA?.share || 0);
+        const investedB = (holdingB?.cost || 0) * (holdingB?.share || 0);
+        const rateA = pa?.profitTotal !== null && pa?.profitTotal !== undefined && investedA > 0
+          ? (pa.profitTotal / investedA) * 100
+          : Number.NEGATIVE_INFINITY;
+        const rateB = pb?.profitTotal !== null && pb?.profitTotal !== undefined && investedB > 0
+          ? (pb.profitTotal / investedB) * 100
+          : Number.NEGATIVE_INFINITY;
+        return sortOrder === 'asc' ? rateA - rateB : rateB - rateA;
       }
       if (sortBy === 'name') {
         return sortOrder === 'asc' ? a.name.localeCompare(b.name, 'zh-CN') : b.name.localeCompare(a.name, 'zh-CN');
@@ -5396,6 +5481,49 @@ export default function HomePage() {
             >
               <SettingsIcon width="20" height="20" />
             </button>
+            <button
+              className="button secondary pending-queue-button"
+              onClick={() => setPendingQueueModalOpen(true)}
+              title="查看待交易队列"
+              style={{
+                height: 38,
+                padding: '0 14px',
+                borderRadius: 12,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                position: 'relative',
+                background: 'rgba(96, 165, 250, 0.12)',
+                border: '1px solid rgba(96, 165, 250, 0.35)',
+                color: 'var(--accent)',
+                fontWeight: 600
+              }}
+            >
+              待交易队列
+              {pendingTrades.length > 0 && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: -6,
+                    right: -6,
+                    minWidth: 18,
+                    height: 18,
+                    padding: '0 5px',
+                    borderRadius: 999,
+                    background: 'var(--danger)',
+                    color: '#2b0b0b',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    lineHeight: '18px',
+                    textAlign: 'center',
+                    border: '1px solid rgba(255,255,255,0.25)',
+                    boxShadow: '0 6px 12px rgba(248, 113, 113, 0.35)'
+                  }}
+                >
+                  {pendingTrades.length > 99 ? '99+' : pendingTrades.length}
+                </span>
+              )}
+            </button>
           </div>
 
           <div className="filter-bar" style={{
@@ -5560,6 +5688,7 @@ export default function HomePage() {
                     { id: 'default', label: '默认' },
                     { id: 'yield', label: '涨跌幅' },
                     { id: 'holding', label: '持有收益' },
+                    { id: 'holdingRate', label: '收益率' },
                     { id: 'name', label: '名称' },
                   ].map((s) => (
                     <button
@@ -5933,28 +6062,24 @@ export default function HomePage() {
                                   const holding = holdings[f.code];
                                   const profit = getHoldingProfit(f, holding);
                                   const total = profit ? profit.profitTotal : null;
-                                  const principal = holding && holding.cost && holding.share ? holding.cost * holding.share : 0;
-                                  const asPercent = percentModes[f.code];
+                                  const investedCost = (holding?.cost || 0) * (holding?.share || 0);
+                                  const totalPercent = total !== null && investedCost > 0
+                                    ? (total / investedCost) * 100
+                                    : null;
                                   const hasTotal = total !== null;
-                                  const formatted = hasTotal
-                                    ? (asPercent && principal > 0
-                                      ? `${total > 0 ? '+' : total < 0 ? '-' : ''}${Math.abs((total / principal) * 100).toFixed(2)}%`
-                                      : `${total > 0 ? '+' : total < 0 ? '-' : ''}¥${Math.abs(total).toFixed(2)}`)
-                                    : '';
                                   const cls = hasTotal ? (total > 0 ? 'up' : total < 0 ? 'down' : '') : 'muted';
                                   return (
-                                    <div
-                                      className="table-cell text-right holding-cell"
-                                      title="点击切换金额/百分比"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (hasTotal) {
-                                          setPercentModes(prev => ({ ...prev, [f.code]: !prev[f.code] }));
-                                        }
-                                      }}
-                                      style={{ cursor: hasTotal ? 'pointer' : 'default' }}
-                                    >
-                                      <span className={cls} style={{ fontWeight: 700 }}>{formatted}</span>
+                                    <div className="table-cell text-right holding-cell" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                                      <span className={cls} style={{ fontWeight: 700 }}>
+                                        {hasTotal
+                                          ? `${total > 0 ? '+' : total < 0 ? '-' : ''}¥${Math.abs(total).toFixed(2)}`
+                                          : ''}
+                                      </span>
+                                      <span className={totalPercent !== null ? (totalPercent > 0 ? 'up' : totalPercent < 0 ? 'down' : '') : 'muted'} style={{ fontSize: 12, fontWeight: 600 }}>
+                                        {totalPercent !== null
+                                          ? `${totalPercent > 0 ? '+' : totalPercent < 0 ? '-' : ''}${Math.abs(totalPercent).toFixed(2)}%`
+                                          : ''}
+                                      </span>
                                     </div>
                                   );
                                 })()}
@@ -6102,26 +6227,28 @@ export default function HomePage() {
                                             {profit.profitToday > 0 ? '+' : profit.profitToday < 0 ? '-' : ''}¥{Math.abs(profit.profitToday).toFixed(2)}
                                           </span>
                                         </div>
-                                        {profit.profitTotal !== null && (
-                                          <div
-                                            className="stat"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setPercentModes(prev => ({ ...prev, [f.code]: !prev[f.code] }));
-                                            }}
-                                            style={{ cursor: 'pointer', flexDirection: 'column', gap: 4 }}
-                                            title="点击切换金额/百分比"
-                                          >
-                                            <span className="label">持有收益{percentModes[f.code] ? '(%)' : ''}</span>
-                                            <span className={`value ${profit.profitTotal > 0 ? 'up' : profit.profitTotal < 0 ? 'down' : ''}`}>
-                                              {profit.profitTotal > 0 ? '+' : profit.profitTotal < 0 ? '-' : ''}
-                                              {percentModes[f.code]
-                                                ? `${Math.abs((holding.cost * holding.share) ? (profit.profitTotal / (holding.cost * holding.share)) * 100 : 0).toFixed(2)}%`
-                                                : `¥${Math.abs(profit.profitTotal).toFixed(2)}`
-                                              }
-                                            </span>
-                                          </div>
-                                        )}
+                                        {profit.profitTotal !== null && (() => {
+                                          const investedCost = (holding?.cost || 0) * (holding?.share || 0);
+                                          const profitPercent = investedCost > 0
+                                            ? (profit.profitTotal / investedCost) * 100
+                                            : 0;
+                                          return (
+                                            <>
+                                              <div className="stat" style={{ flexDirection: 'column', gap: 4 }}>
+                                                <span className="label">持有收益</span>
+                                                <span className={`value ${profit.profitTotal > 0 ? 'up' : profit.profitTotal < 0 ? 'down' : ''}`}>
+                                                  {profit.profitTotal > 0 ? '+' : profit.profitTotal < 0 ? '-' : ''}¥{Math.abs(profit.profitTotal).toFixed(2)}
+                                                </span>
+                                              </div>
+                                              <div className="stat" style={{ flexDirection: 'column', gap: 4 }}>
+                                                <span className="label">持有收益率</span>
+                                                <span className={`value ${profitPercent > 0 ? 'up' : profitPercent < 0 ? 'down' : ''}`}>
+                                                  {profitPercent > 0 ? '+' : profitPercent < 0 ? '-' : ''}{Math.abs(profitPercent).toFixed(2)}%
+                                                </span>
+                                              </div>
+                                            </>
+                                          );
+                                        })()}
                                       </>
                                     );
                                   })()}
@@ -6263,6 +6390,15 @@ export default function HomePage() {
             onAction={(type) => (actionModal.mode === 'first'
               ? handleFirstHoldingAction(type, actionModal.fund)
               : handleAction(type, actionModal.fund))}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {pendingQueueModalOpen && (
+          <PendingTradesModal
+            pendingTrades={pendingTrades}
+            onClose={() => setPendingQueueModalOpen(false)}
           />
         )}
       </AnimatePresence>
