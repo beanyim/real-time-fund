@@ -391,16 +391,6 @@ export const fetchShanghaiIndexDate = async () => {
   });
 };
 
-export const fetchLatestRelease = async () => {
-  const res = await fetch('https://api.github.com/repos/hzm0321/real-time-fund/releases/latest');
-  if (!res.ok) return null;
-  const data = await res.json();
-  return {
-    tagName: data.tag_name,
-    body: data.body || ''
-  };
-};
-
 export const submitFeedback = async (formData) => {
   const response = await fetch('https://api.web3forms.com/submit', {
     method: 'POST',

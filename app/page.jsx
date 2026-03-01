@@ -2290,16 +2290,23 @@ export default function HomePage() {
   const timerRef = useRef(null);
   const countdownTimerRef = useRef(null);
   const nextRefreshAtRef = useRef(Date.now());
-  const refreshingRef = useRef(false);
   const isLoggingOutRef = useRef(false);
 
-  // 刷新频率状态
-  const [refreshMs, setRefreshMs] = useState(30000);
+
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tempSeconds, setTempSeconds] = useState(30);
 
+  // 刷新频率状态
+  const [refreshMs, setRefreshMs] = useState(30000);
   // 全局刷新状态
   const [refreshing, setRefreshing] = useState(false);
+  // 刷新状态实时引用：供异步循环读取最新值，避免 useEffect/async 闭包拿到旧 refreshing 快照
+  const refreshingRef = useRef(false);
+
+  // 本地内存基金信息缓存（避免每次更新都直接写 localStorage）
+  const localFundsInfo = useRef({});
+  // 基金信息是否发生变动（用于触发统一回写）
+  const [fundsInfoChange, setFundsInfoChange] = useState(false);
 
   // 自选状态
   const [favorites, setFavorites] = useState(new Set());
@@ -3388,6 +3395,66 @@ export default function HomePage() {
     localStorage.setItem('fundsInfo', JSON.stringify(next || {}));
   };
 
+  // 刷新轮询中的休眠工具
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // 生成 1~2 秒随机间隔（用于刷新期间的循环节流）
+  const getRefreshLoopDelay = () => 1000 + Math.floor(Math.random() * 1000);
+
+  // 轮询刷新指定基金编码集合，增量更新内存缓存并在结束后触发统一回写标识
+  // 说明：该方法统一维护 refreshing 状态，开始时置为 true，结束（成功/失败）都会置为 false
+  const refreshFundsInfo = async (codes) => {
+    // 避免并发刷新
+    if (refreshingRef.current) {
+      console.log('[fundsInfo] refreshFundsInfo 跳过：已有刷新任务进行中');
+      return [];
+    }
+
+    refreshingRef.current = true;
+    setRefreshing(true);
+
+    // 兼容数组/Set 入参，并做去重与空值过滤
+    const codeList = Array.isArray(codes)
+      ? codes
+      : (codes instanceof Set ? Array.from(codes) : []);
+    const uniqueCodes = Array.from(new Set(codeList.filter(code => typeof code === 'string' && code.trim())));
+    const updatedFunds = [];
+
+    console.log('[fundsInfo] 开始刷新基金信息', { total: uniqueCodes.length, codes: uniqueCodes });
+
+    try {
+      // 逐个轮询拉取基金信息，成功后即时合并到内存缓存
+      for (const code of uniqueCodes) {
+        try {
+          const fundData = await fetchFundData(code);
+          updatedFunds.push(fundData);
+          const info = collectFundInfo(fundData);
+          if (info) {
+            localFundsInfo.current = {
+              ...localFundsInfo.current,
+              [code]: {
+                ...(localFundsInfo.current?.[code] || {}),
+                ...info
+              }
+            };
+            console.log('[fundsInfo] 已更新内存缓存', { code });
+          }
+        } catch (e) {
+          console.error(`刷新基金 ${code} 信息失败`, e);
+        }
+      }
+
+      // 刷新结束后打变更标识，交给监听统一回写 localStorage
+      setFundsInfoChange(true);
+      console.log('[fundsInfo] 刷新完成，已标记待回写', { successCount: updatedFunds.length, requestCount: uniqueCodes.length });
+      return updatedFunds;
+    } finally {
+      refreshingRef.current = false;
+      setRefreshing(false);
+      console.log('[fundsInfo] 刷新任务结束，refreshing=false');
+    }
+  };
+
   const mergeFundsWithInfo = (list, infoMap) => {
     if (!Array.isArray(list)) return [];
     return list.map((fund) => {
@@ -3436,20 +3503,43 @@ export default function HomePage() {
     return hasInfo ? info : null;
   };
 
+  // 根据基金列表增量更新内存中的基金信息缓存，并按需触发回写标识
   const updateFundsInfoFromList = (list) => {
-    if (!Array.isArray(list) || list.length === 0) return readFundsInfo();
-    const current = readFundsInfo();
-    let changed = false;
+    // 无有效输入时，直接返回当前内存缓存
+    if (!Array.isArray(list) || list.length === 0) {
+      console.log('[fundsInfo] updateFundsInfoFromList 跳过：入参为空');
+      return localFundsInfo.current || {};
+    }
+
+    const current = localFundsInfo.current || {};
     const next = { ...current };
+    let hasChanges = false;
+    console.log('[fundsInfo] updateFundsInfoFromList 开始', { count: list.length });
+
+    // 从基金列表中提取信息并合并到缓存（按 code 覆盖）
     list.forEach((fund) => {
       const code = fund?.code;
       if (!code) return;
       const info = collectFundInfo(fund);
       if (!info) return;
-      next[code] = { ...(next[code] || {}), ...info };
-      changed = true;
+
+      const merged = { ...(next[code] || {}), ...info };
+      const prev = next[code] || {};
+      if (JSON.stringify(merged) !== JSON.stringify(prev)) {
+        next[code] = merged;
+        hasChanges = true;
+      }
     });
-    if (changed) writeFundsInfo(next);
+
+    // 仅在缓存实际变化时更新引用并触发回写标识
+    if (hasChanges) {
+      localFundsInfo.current = next;
+      setFundsInfoChange(true);
+      console.log('[fundsInfo] updateFundsInfoFromList 完成并标记回写', { size: Object.keys(next).length });
+    } else {
+      console.log('[fundsInfo] updateFundsInfoFromList 完成：无变化');
+    }
+
     return next;
   };
 
@@ -3457,15 +3547,18 @@ export default function HomePage() {
     if (!codes) return;
     const list = Array.isArray(codes) ? codes : [codes];
     if (!list.length) return;
-    const current = readFundsInfo();
     let changed = false;
-    const next = { ...current };
+    const next = { ...(localFundsInfo.current || {}) };
     list.forEach((code) => {
       if (!code || !(code in next)) return;
       delete next[code];
       changed = true;
     });
-    if (changed) writeFundsInfo(next);
+    if (changed) {
+      localFundsInfo.current = next;
+      setFundsInfoChange(true);
+      console.log('[fundsInfo] 已删除基金信息缓存', { codes: list });
+    }
   };
 
   const prepareFundsForStorage = (list) => stripFundInfoFromFunds(stripHoldingsFromFunds(list));
@@ -3507,7 +3600,97 @@ export default function HomePage() {
     });
   };
 
-  const sanitizeFunds = (list) => ensureFundOrder(dedupeByCode(stripHoldingsFromFunds(list)));
+  const sanitizeFunds = (list) => ensureFundOrder(dedupeByCode(list));
+
+  // 页面初始化时读取 localStorage 中的 fundsInfo 到内存缓存
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    localFundsInfo.current = readFundsInfo();
+    setFundsInfoChange(false);
+    console.log('[fundsInfo] 初始化完成', { size: Object.keys(localFundsInfo.current || {}).length });
+  }, []);
+
+  // 监听基金信息变更标识，统一回写 localStorage 后重置标识
+  useEffect(() => {
+    if (!fundsInfoChange) return;
+    writeFundsInfo(localFundsInfo.current || {});
+    setFundsInfoChange(false);
+    console.log('[fundsInfo] 已回写 localStorage 并重置变更标识');
+  }, [fundsInfoChange]);
+
+  // 监听 refreshing：循环将 localFundsInfo 合并到页面基金展示，结束后再执行一次收尾刷新
+  useEffect(() => {
+    if (!refreshing) return;
+
+    let cancelled = false;
+
+    const applyFundsFromLocalInfo = () => {
+      const infoMap = localFundsInfo.current || {};
+      setFunds((prev) => {
+        const mergedWithInfo = mergeFundsWithInfo(prev, infoMap);
+        return sanitizeFunds(mergedWithInfo);
+      });
+    };
+
+    const run = async () => {
+      console.log('[fundsInfo] 展示刷新循环开始');
+      while (!cancelled && refreshingRef.current) {
+        applyFundsFromLocalInfo();
+        const delay = getRefreshLoopDelay();
+        console.log('[fundsInfo] 展示刷新循环休眠', { delay });
+        await sleep(delay);
+      }
+      if (cancelled) {
+        // 结束后再执行一次，确保最后一批缓存也展示出来
+        applyFundsFromLocalInfo();
+        console.log('[fundsInfo] 展示刷新循环结束，已执行收尾刷新');
+      }
+    };
+
+    run();
+
+    return () => {
+      cancelled = true;
+      console.log('[fundsInfo] 展示刷新循环清理');
+    };
+  }, [refreshing]);
+
+  // 监听 refreshing：循环处理待交易队列，结束后再执行一次收尾处理
+  useEffect(() => {
+    if (!refreshing) return;
+
+    let cancelled = false;
+
+    const run = async () => {
+      console.log('[fundsInfo] 待交易处理循环开始');
+      while (!cancelled && refreshingRef.current) {
+        try {
+          await processPendingQueue();
+        } catch (e) {
+          console.error('[fundsInfo] 待交易处理循环异常', e);
+        }
+        const delay = getRefreshLoopDelay();
+        console.log('[fundsInfo] 待交易处理循环休眠', { delay });
+        await sleep(delay);
+      }
+      if (cancelled) {
+        // 结束后再执行一次，避免最后窗口期遗漏可处理交易
+        try {
+          await processPendingQueue();
+          console.log('[fundsInfo] 待交易处理循环结束，已执行收尾处理');
+        } catch (e) {
+          console.error('[fundsInfo] 待交易收尾处理异常', e);
+        }
+      }
+    };
+
+    run();
+
+    return () => {
+      cancelled = true;
+      console.log('[fundsInfo] 待交易处理循环清理');
+    };
+  }, [refreshing]);
 
   // 初始化数据加载 - 支持多账本
   useEffect(() => {
@@ -3898,7 +4081,8 @@ export default function HomePage() {
       const codes = Array.from(new Set(funds.map((f) => f.code)));
       if (codes.length) {
         resetRefreshCountdown();
-        refreshAll(codes);
+        // 定时刷新仅刷新基金信息，不直接触发 refreshAll 的其他流程
+        refreshFundsInfo(codes);
       }
     }, refreshMs);
 
@@ -3986,73 +4170,12 @@ export default function HomePage() {
     }
   };
 
+  // 兼容历史调用：统一由 refreshFundsInfo 执行刷新，不再在此处处理展示合并与待交易队列
   const refreshAll = async (codes) => {
-    if (refreshingRef.current) return;
-    const refreshRunId = refreshRunIdRef.current + 1;
-    refreshRunIdRef.current = refreshRunId;
-    refreshingRef.current = true;
-    setRefreshing(true);
-    const currentPortfolioIdAtStart = activePortfolioIdRef.current;
-    const uniqueCodes = Array.from(new Set(codes));
-    try {
-      const updated = [];
-      for (const c of uniqueCodes) {
-        if (refreshRunIdRef.current !== refreshRunId) break;
-        try {
-          const data = await fetchFundData(c);
-          if (refreshRunIdRef.current !== refreshRunId) break;
-          updated.push(data);
-        } catch (e) {
-          console.error(`刷新基金 ${c} 失败`, e);
-          // 失败时从当前 state 中寻找旧数据
-          setFunds(prev => {
-            const old = prev.find((f) => f.code === c);
-            if (old) updated.push(old);
-            return prev;
-          });
-        }
-      }
-
-      if (
-        refreshRunIdRef.current === refreshRunId
-        && updated.length > 0
-        && activePortfolioIdRef.current === currentPortfolioIdAtStart
-      ) {
-        const infoMap = updateFundsInfoFromList(updated);
-        setFunds(prev => {
-          // 将更新后的数据合并回当前最新的 state 中，防止覆盖掉刚刚导入的数据
-          const merged = [...prev];
-          updated.forEach(u => {
-            const idx = merged.findIndex(f => f.code === u.code);
-            if (idx > -1) {
-              merged[idx] = mergeFundWithOrder(u, merged[idx]);
-            } else {
-              merged.push(mergeFundWithOrder(u));
-            }
-          });
-          const mergedWithInfo = mergeFundsWithInfo(merged, infoMap);
-          const deduped = sanitizeFunds(mergedWithInfo);
-          const fundsForStorage = prepareFundsForStorage(deduped);
-          storageHelper.setItem('funds', JSON.stringify(fundsForStorage));
-          return deduped;
-        });
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      const isCurrentRun = refreshRunIdRef.current === refreshRunId;
-      const shouldProcessPending = isCurrentRun && activePortfolioIdRef.current === currentPortfolioIdAtStart;
-      if (isCurrentRun) {
-        refreshingRef.current = false;
-        setRefreshing(false);
-      }
-      if (!shouldProcessPending) return;
-      try {
-        await processPendingQueue();
-      }catch (e) {
-        showToast('待交易队列计算出错', 'error')
-      }
-    }
+    const uniqueCodes = Array.from(new Set(Array.isArray(codes) ? codes : []));
+    if (!uniqueCodes.length) return;
+    console.log('[fundsInfo] refreshAll 转发到 refreshFundsInfo', { total: uniqueCodes.length });
+    await refreshFundsInfo(uniqueCodes);
   };
 
   const toggleViewMode = () => {
