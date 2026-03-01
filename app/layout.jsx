@@ -1,6 +1,5 @@
 import './globals.css';
 import AnalyticsGate from './components/AnalyticsGate';
-import packageJson from '../package.json';
 
 export const metadata = {
   title: `基估宝`,

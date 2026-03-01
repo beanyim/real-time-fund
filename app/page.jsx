@@ -2385,7 +2385,6 @@ export default function HomePage() {
   const holdingsRef = useRef(holdings);
   const pendingTradesRef = useRef(pendingTrades);
   const activePortfolioIdRef = useRef(null);
-  const refreshRunIdRef = useRef(0);
   const portfolioDropdownRef = useRef(null);
   const newPortfolioInputRef = useRef(null);
   const topHoldingsRequestRef = useRef(0);
@@ -2427,7 +2426,6 @@ export default function HomePage() {
     const portfolio = portfolios.find(p => p.id === resolvedPortfolioId);
     if (!portfolio) return;
     lastPortfolioSwitchAtRef.current = Date.now();
-    refreshRunIdRef.current += 1;
 
     const { mergedFunds } = resolveFundsWithInfo(portfolio.funds || []);
     const nextFunds = sanitizeFunds(mergedFunds);
