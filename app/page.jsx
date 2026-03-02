@@ -37,11 +37,7 @@ import {
 import weChatGroupImg from "./assets/weChatGroup.png";
 import {isSupabaseConfigured, supabase} from './lib/supabase';
 import {
-    createEmptyV2Data,
     createPortfolio,
-    isLegacyData,
-    mergeOldDataToPortfolio,
-    migrateToV2,
     validateV2Data
 } from './lib/migration';
 import {
@@ -2377,7 +2373,6 @@ export default function HomePage() {
   const [pendingQueueModalOpen, setPendingQueueModalOpen] = useState(false); // 待交易队列弹窗
   const [portfolioDropdownOpen, setPortfolioDropdownOpen] = useState(false); // 账本下拉菜单
   const [editingPortfolio, setEditingPortfolio] = useState(null); // 正在编辑的账本
-  const [importChoiceModal, setImportChoiceModal] = useState({ open: false, data: null }); // 导入选择弹窗
   const [newPortfolioModal, setNewPortfolioModal] = useState({ open: false, callback: null }); // 新建账本弹窗
   const [newPortfolioName, setNewPortfolioName] = useState(''); // 新建账本名称
   const [deletePortfolioConfirm, setDeletePortfolioConfirm] = useState(null); // 删除账本确认 { id, name }
@@ -3690,10 +3685,9 @@ export default function HomePage() {
     };
   }, [refreshing]);
 
-  // 初始化数据加载 - 支持多账本
+  // 初始化数据加载 - 仅支持 v2 多账本结构
   useEffect(() => {
     try {
-      // 尝试加载 v2 数据结构
       const userConfigStr = localStorage.getItem('userConfig');
       let userConfig = null;
 
@@ -3703,9 +3697,7 @@ export default function HomePage() {
         } catch {}
       }
 
-      // 检查是否有 v2 数据
       if (userConfig && userConfig.version >= 2 && Array.isArray(userConfig.portfolios)) {
-        // v2 数据结构
         const validatedConfig = validateV2Data(userConfig);
         const { cleanedPortfolios } = sanitizePortfoliosWithInfo(validatedConfig.portfolios || []);
         const cleanedConfig = {
@@ -3729,7 +3721,6 @@ export default function HomePage() {
         const storedViewMode = localStorage.getItem('viewMode') === 'list' ? 'list' : 'card';
         setViewMode(storedViewMode);
 
-        // 加载当前账本数据
         const currentP = cleanedPortfolios.find(p => p.id === resolvedPortfolioId)
           || cleanedPortfolios[0];
         if (currentP) {
@@ -3747,86 +3738,35 @@ export default function HomePage() {
           if (codes.length) refreshAll(codes);
         }
       } else {
-        // 尝试从老数据结构迁移
-        const oldFunds = JSON.parse(localStorage.getItem('funds') || '[]');
-        const oldFavorites = JSON.parse(localStorage.getItem('favorites') || '[]');
-        const oldGroups = JSON.parse(localStorage.getItem('groups') || '[]');
-        const oldHoldings = JSON.parse(localStorage.getItem('holdings') || '{}');
-        const oldPending = JSON.parse(localStorage.getItem('pendingTrades') || '[]');
-        const oldRefreshMs = parseInt(localStorage.getItem('refreshMs') || '30000', 10);
-        const oldViewMode = localStorage.getItem('viewMode');
-
-        // 检查是否有老数据
-        const hasOldData = Array.isArray(oldFunds) && oldFunds.length > 0;
-
-        if (hasOldData) {
-          const resolvedLegacy = resolveFundsWithInfo(oldFunds);
-          // 迁移老数据到 v2 结构
-          const oldData = {
-            funds: resolvedLegacy.cleanedFunds,
-            favorites: oldFavorites,
-            groups: oldGroups,
-            holdings: oldHoldings,
-            pendingTrades: oldPending,
-            refreshMs: oldRefreshMs
-          };
-          const v2Data = migrateToV2(oldData, '默认账本');
-          const cleanedV2Data = {
-            ...v2Data,
-            portfolios: stripHoldingsFromPortfolios(v2Data.portfolios || [])
-          };
-
-          // 保存 v2 数据
-          localStorage.setItem('userConfig', JSON.stringify(cleanedV2Data));
-
-          // 设置状态
-          setPortfolios(cleanedV2Data.portfolios);
-          const resolvedPortfolioId = cleanedV2Data.portfolios[0]?.id;
-          if (resolvedPortfolioId) {
-            setCurrentPortfolioId(resolvedPortfolioId);
-            localStorage.setItem('currentPortfolioId', resolvedPortfolioId);
-          }
-          setRefreshMs(cleanedV2Data.refreshMs);
-          setTempSeconds(Math.round(cleanedV2Data.refreshMs / 1000));
-          const resolvedViewMode = oldViewMode === 'list' ? 'list' : 'card';
-          setViewMode(resolvedViewMode);
-          localStorage.setItem('viewMode', resolvedViewMode);
-
-          const currentP = cleanedV2Data.portfolios[0];
-          const resolved = resolveFundsWithInfo(currentP.funds || []);
-          const dedupedFunds = sanitizeFunds(resolved.mergedFunds);
-          const fundsForStorage = prepareFundsForStorage(dedupedFunds);
-          setFunds(dedupedFunds);
-          setFavorites(new Set(currentP.favorites));
-          setGroups(currentP.groups);
-          setHoldings(currentP.holdings);
-          setPendingTrades(currentP.pendingTrades);
-          localStorage.setItem('funds', JSON.stringify(fundsForStorage));
-
-          const codes = dedupedFunds.map(f => f.code);
-          if (codes.length) refreshAll(codes);
-        } else {
-          // 没有任何数据，创建空的 v2 结构
-          const emptyV2 = createEmptyV2Data();
-          localStorage.setItem('userConfig', JSON.stringify(emptyV2));
-          setPortfolios(emptyV2.portfolios);
-          const resolvedPortfolioId = emptyV2.portfolios[0]?.id;
-          if (resolvedPortfolioId) {
-            setCurrentPortfolioId(resolvedPortfolioId);
-            localStorage.setItem('currentPortfolioId', resolvedPortfolioId);
-          }
+        // 不再兼容老数据结构：无有效 v2 配置时创建空 v2 结构
+        const emptyConfig = {
+          version: 2,
+          refreshMs: 30000,
+          portfolios: [createPortfolio('默认账本')]
+        };
+        localStorage.setItem('userConfig', JSON.stringify(emptyConfig));
+        setPortfolios(emptyConfig.portfolios);
+        const resolvedPortfolioId = emptyConfig.portfolios[0]?.id;
+        if (resolvedPortfolioId) {
+          setCurrentPortfolioId(resolvedPortfolioId);
+          localStorage.setItem('currentPortfolioId', resolvedPortfolioId);
+          activePortfolioIdRef.current = resolvedPortfolioId;
         }
       }
     } catch (e) {
       console.error('初始化数据加载失败:', e);
-      // 出错时创建空的 v2 结构
-      const emptyV2 = createEmptyV2Data();
-      localStorage.setItem('userConfig', JSON.stringify(emptyV2));
-      setPortfolios(emptyV2.portfolios);
-      const resolvedPortfolioId = emptyV2.portfolios[0]?.id;
+      const emptyConfig = {
+        version: 2,
+        refreshMs: 30000,
+        portfolios: [createPortfolio('默认账本')]
+      };
+      localStorage.setItem('userConfig', JSON.stringify(emptyConfig));
+      setPortfolios(emptyConfig.portfolios);
+      const resolvedPortfolioId = emptyConfig.portfolios[0]?.id;
       if (resolvedPortfolioId) {
         setCurrentPortfolioId(resolvedPortfolioId);
         localStorage.setItem('currentPortfolioId', resolvedPortfolioId);
+        activePortfolioIdRef.current = resolvedPortfolioId;
       }
     }
   }, []);
@@ -4436,173 +4376,41 @@ export default function HomePage() {
       });
     }
 
-    // 兼容老数据结构 (v1)
-    const rawFunds = Array.isArray(payload.funds) ? payload.funds : [];
-    const orderedFundEntries = rawFunds
-      .map((fund) => ({
-        code: normalizeCode(fund?.code || fund?.CODE),
-        order: getFundOrderValue(fund)
-      }))
-      .filter((item) => item.code)
-      .sort((a, b) => a.order - b.order);
-    const orderedFundCodes = orderedFundEntries.reduce((acc, item) => {
-      if (!acc.includes(item.code)) acc.push(item.code);
-      return acc;
-    }, []);
-    const uniqueFundCodes = orderedFundCodes;
-
-    const favorites = Array.isArray(payload.favorites)
-      ? Array.from(new Set(payload.favorites.map(normalizeCode).filter((code) => uniqueFundCodes.includes(code)))).sort()
-      : [];
-
-    const groups = Array.isArray(payload.groups)
-      ? payload.groups
-          .map((group) => {
-            const id = normalizeCode(group?.id);
-            if (!id) return null;
-            const name = typeof group?.name === 'string' ? group.name : '';
-            const codes = Array.isArray(group?.codes)
-              ? Array.from(new Set(group.codes.map(normalizeCode).filter((code) => uniqueFundCodes.includes(code)))).sort()
-              : [];
-            return { id, name, codes };
-          })
-          .filter(Boolean)
-          .sort((a, b) => a.id.localeCompare(b.id))
-      : [];
-
-    const holdingsSource = payload.holdings && typeof payload.holdings === 'object' && !Array.isArray(payload.holdings)
-      ? payload.holdings
-      : {};
-    const holdings = {};
-    Object.keys(holdingsSource)
-      .map(normalizeCode)
-      .filter((code) => uniqueFundCodes.includes(code))
-      .sort()
-      .forEach((code) => {
-        const value = holdingsSource[code] || {};
-        const share = normalizeNumber(value.share);
-        const cost = normalizeNumber(value.cost);
-        if (share === null && cost === null) return;
-        holdings[code] = { share, cost };
-      });
-
-    const pendingTrades = Array.isArray(payload.pendingTrades)
-      ? payload.pendingTrades
-          .map((trade) => {
-            const fundCode = normalizeCode(trade?.fundCode);
-            if (!fundCode) return null;
-            return {
-              id: trade?.id ? String(trade.id) : '',
-              fundCode,
-              type: trade?.type || '',
-              share: normalizeNumber(trade?.share),
-              amount: normalizeNumber(trade?.amount),
-              feeRate: normalizeNumber(trade?.feeRate),
-              feeMode: trade?.feeMode || '',
-              feeValue: normalizeNumber(trade?.feeValue),
-              date: trade?.date || '',
-              isAfter3pm: !!trade?.isAfter3pm
-            };
-          })
-          .filter((trade) => trade && uniqueFundCodes.includes(trade.fundCode))
-          .sort((a, b) => {
-            const keyA = a.id || `${a.fundCode}|${a.type}|${a.date}|${a.share ?? ''}|${a.amount ?? ''}|${a.feeMode}|${a.feeValue ?? ''}|${a.feeRate ?? ''}|${a.isAfter3pm ? 1 : 0}`;
-            const keyB = b.id || `${b.fundCode}|${b.type}|${b.date}|${b.share ?? ''}|${b.amount ?? ''}|${b.feeMode}|${b.feeValue ?? ''}|${b.feeRate ?? ''}|${b.isAfter3pm ? 1 : 0}`;
-            return keyA.localeCompare(keyB);
-          })
-      : [];
-
-    return JSON.stringify({
-      funds: orderedFundCodes,
-      favorites,
-      groups,
-      refreshMs: Number.isFinite(payload.refreshMs) ? payload.refreshMs : 30000,
-      holdings,
-      pendingTrades
-    });
+    return '';
   }
 
   const collectLocalPayload = () => {
     try {
-      // 优先使用 v2 数据结构
       const userConfigStr = localStorage.getItem('userConfig');
-      if (userConfigStr) {
-        const userConfig = JSON.parse(userConfigStr);
-        if (userConfig && userConfig.version >= 2) {
-          return {
-            ...userConfig,
-            portfolios: stripHoldingsFromPortfolios(userConfig.portfolios || []),
-            exportedAt: nowInTz().toISOString()
-          };
-        }
+      if (!userConfigStr) {
+        return {
+          version: 2,
+          refreshMs: 30000,
+          portfolios: [],
+          exportedAt: nowInTz().toISOString()
+        };
       }
 
-      // 降级到老数据结构
-      const funds = prepareFundsForStorage(JSON.parse(localStorage.getItem('funds') || '[]'));
-      const favorites = JSON.parse(localStorage.getItem('favorites') || '[]');
-      const groups = JSON.parse(localStorage.getItem('groups') || '[]');
-      const fundCodes = new Set(
-        Array.isArray(funds)
-          ? funds.map((f) => f?.code).filter(Boolean)
-          : []
-      );
-      const holdings = JSON.parse(localStorage.getItem('holdings') || '{}');
-      const pendingTrades = JSON.parse(localStorage.getItem('pendingTrades') || '[]');
-      const cleanedHoldings = holdings && typeof holdings === 'object' && !Array.isArray(holdings)
-        ? Object.entries(holdings).reduce((acc, [code, value]) => {
-          if (!fundCodes.has(code) || !value || typeof value !== 'object') return acc;
-          const parsedShare = typeof value.share === 'number'
-            ? value.share
-            : typeof value.share === 'string'
-              ? Number(value.share)
-              : NaN;
-          const parsedCost = typeof value.cost === 'number'
-            ? value.cost
-            : typeof value.cost === 'string'
-              ? Number(value.cost)
-              : NaN;
-          const nextShare = Number.isFinite(parsedShare) ? parsedShare : null;
-          const nextCost = Number.isFinite(parsedCost) ? parsedCost : null;
-          if (nextShare === null && nextCost === null) return acc;
-          acc[code] = {
-            ...value,
-            share: nextShare,
-            cost: nextCost
-          };
-          return acc;
-        }, {})
-        : {};
-      const cleanedFavorites = Array.isArray(favorites)
-        ? favorites.filter((code) => fundCodes.has(code))
-        : [];
-      const cleanedGroups = Array.isArray(groups)
-        ? groups.map((group) => ({
-          ...group,
-          codes: Array.isArray(group?.codes)
-            ? group.codes.filter((code) => fundCodes.has(code))
-            : []
-        }))
-        : [];
-      const cleanedPendingTrades = Array.isArray(pendingTrades)
-        ? pendingTrades.filter((trade) => trade && fundCodes.has(trade.fundCode))
-        : [];
+      const userConfig = JSON.parse(userConfigStr);
+      if (userConfig && userConfig.version >= 2) {
+        return {
+          ...userConfig,
+          portfolios: stripHoldingsFromPortfolios(userConfig.portfolios || []),
+          exportedAt: nowInTz().toISOString()
+        };
+      }
+
       return {
-        funds,
-        favorites: cleanedFavorites,
-        groups: cleanedGroups,
-        refreshMs: parseInt(localStorage.getItem('refreshMs') || '30000', 10),
-        holdings: cleanedHoldings,
-        pendingTrades: cleanedPendingTrades,
+        version: 2,
+        refreshMs: 30000,
+        portfolios: [],
         exportedAt: nowInTz().toISOString()
       };
     } catch {
       return {
-        funds: [],
-        favorites: [],
-        groups: [],
+        version: 2,
         refreshMs: 30000,
-        holdings: {},
-        pendingTrades: [],
+        portfolios: [],
         exportedAt: nowInTz().toISOString()
       };
     }
@@ -4619,108 +4427,60 @@ export default function HomePage() {
       const recentSwitchThresholdMs = 5000;
       const shouldPreserveCurrentPortfolio = now - lastPortfolioSwitchAtRef.current <= recentSwitchThresholdMs;
 
-      // 检查是否为 v2 多账本数据结构
-      if (cloudData.version >= 2 && Array.isArray(cloudData.portfolios)) {
-        // v2 数据结构
-        const validatedConfig = validateV2Data(cloudData);
-        const { cleanedPortfolios, didStrip } = sanitizePortfoliosWithInfo(validatedConfig.portfolios || []);
-        const storedPortfolioId = localStorage.getItem('currentPortfolioId');
-        const resolvedCurrentId = shouldPreserveCurrentPortfolio && currentPortfolioId
-          && cleanedPortfolios.some((p) => p.id === currentPortfolioId)
-          ? currentPortfolioId
-          : (storedPortfolioId && cleanedPortfolios.some((p) => p.id === storedPortfolioId)
-            ? storedPortfolioId
-            : cleanedPortfolios[0]?.id);
-        const cleanedConfig = { ...validatedConfig, portfolios: cleanedPortfolios };
+      // 仅支持 v2 多账本数据结构
+      if (!(cloudData.version >= 2 && Array.isArray(cloudData.portfolios))) {
+        console.warn('忽略非 v2 云端配置数据');
+        return;
+      }
 
-        // 保存到 localStorage
-        localStorage.setItem('userConfig', JSON.stringify(cleanedConfig));
+      const validatedConfig = validateV2Data(cloudData);
+      const { cleanedPortfolios, didStrip } = sanitizePortfoliosWithInfo(validatedConfig.portfolios || []);
+      const storedPortfolioId = localStorage.getItem('currentPortfolioId');
+      const resolvedCurrentId = shouldPreserveCurrentPortfolio && currentPortfolioId
+        && cleanedPortfolios.some((p) => p.id === currentPortfolioId)
+        ? currentPortfolioId
+        : (storedPortfolioId && cleanedPortfolios.some((p) => p.id === storedPortfolioId)
+          ? storedPortfolioId
+          : cleanedPortfolios[0]?.id);
+      const cleanedConfig = { ...validatedConfig, portfolios: cleanedPortfolios };
 
-        // 更新状态
-        setPortfolios(cleanedPortfolios);
-        if (resolvedCurrentId) {
-          setCurrentPortfolioId(resolvedCurrentId);
-          localStorage.setItem('currentPortfolioId', resolvedCurrentId);
-          activePortfolioIdRef.current = resolvedCurrentId;
-        }
-        setRefreshMs(cleanedConfig.refreshMs);
-        setTempSeconds(Math.round(cleanedConfig.refreshMs / 1000));
-        const storedViewMode = localStorage.getItem('viewMode') === 'list' ? 'list' : 'card';
-        setViewMode(storedViewMode);
+      localStorage.setItem('userConfig', JSON.stringify(cleanedConfig));
 
-        // 加载当前账本数据
-        const currentP = cleanedPortfolios.find(p => p.id === resolvedCurrentId)
-          || cleanedPortfolios[0];
-        if (currentP) {
-          const resolved = resolveFundsWithInfo(currentP.funds || []);
-          const dedupedFunds = sanitizeFunds(resolved.mergedFunds);
-          const fundsForStorage = prepareFundsForStorage(dedupedFunds);
-          setFunds(dedupedFunds);
-          setFavorites(new Set(currentP.favorites || []));
-          setGroups(currentP.groups || []);
-          setHoldings(currentP.holdings || {});
-          setPendingTrades(currentP.pendingTrades || []);
+      setPortfolios(cleanedPortfolios);
+      if (resolvedCurrentId) {
+        setCurrentPortfolioId(resolvedCurrentId);
+        localStorage.setItem('currentPortfolioId', resolvedCurrentId);
+        activePortfolioIdRef.current = resolvedCurrentId;
+      }
+      setRefreshMs(cleanedConfig.refreshMs);
+      setTempSeconds(Math.round(cleanedConfig.refreshMs / 1000));
+      const storedViewMode = localStorage.getItem('viewMode') === 'list' ? 'list' : 'card';
+      setViewMode(storedViewMode);
 
-          // 同步到老的 localStorage keys（兼容）
-          localStorage.setItem('funds', JSON.stringify(fundsForStorage));
-          localStorage.setItem('favorites', JSON.stringify(currentP.favorites || []));
-          localStorage.setItem('groups', JSON.stringify(currentP.groups || []));
-          localStorage.setItem('holdings', JSON.stringify(currentP.holdings || {}));
-          localStorage.setItem('pendingTrades', JSON.stringify(currentP.pendingTrades || []));
-          localStorage.setItem('refreshMs', String(cleanedConfig.refreshMs));
+      const currentP = cleanedPortfolios.find(p => p.id === resolvedCurrentId)
+        || cleanedPortfolios[0];
+      if (currentP) {
+        const resolved = resolveFundsWithInfo(currentP.funds || []);
+        const dedupedFunds = sanitizeFunds(resolved.mergedFunds);
+        const fundsForStorage = prepareFundsForStorage(dedupedFunds);
+        setFunds(dedupedFunds);
+        setFavorites(new Set(currentP.favorites || []));
+        setGroups(currentP.groups || []);
+        setHoldings(currentP.holdings || {});
+        setPendingTrades(currentP.pendingTrades || []);
 
-          const codes = dedupedFunds.map(f => f.code);
-          if (codes.length) await refreshAll(codes);
-        }
-        if (didStrip && userIdRef.current) {
-          await syncUserConfig(userIdRef.current, false);
-        }
-      } else {
-        // 老数据结构 (v1) - 迁移为 v2
-        const v2Data = migrateToV2(cloudData, '默认账本');
-        localStorage.setItem('userConfig', JSON.stringify(v2Data));
-
-        setPortfolios(v2Data.portfolios);
-        const resolvedPortfolioId = v2Data.portfolios[0]?.id;
-        if (resolvedPortfolioId) {
-          setCurrentPortfolioId(resolvedPortfolioId);
-          localStorage.setItem('currentPortfolioId', resolvedPortfolioId);
-        }
-
-        const resolvedLegacyFunds = resolveFundsWithInfo(Array.isArray(cloudData.funds) ? cloudData.funds : []);
-        const nextFunds = sanitizeFunds(resolvedLegacyFunds.mergedFunds);
-        const fundsForStorage = prepareFundsForStorage(nextFunds);
-        setFunds(nextFunds);
         localStorage.setItem('funds', JSON.stringify(fundsForStorage));
-        const nextFundCodes = new Set(nextFunds.map((f) => f.code));
+        localStorage.setItem('favorites', JSON.stringify(currentP.favorites || []));
+        localStorage.setItem('groups', JSON.stringify(currentP.groups || []));
+        localStorage.setItem('holdings', JSON.stringify(currentP.holdings || {}));
+        localStorage.setItem('pendingTrades', JSON.stringify(currentP.pendingTrades || []));
+        localStorage.setItem('refreshMs', String(cleanedConfig.refreshMs));
 
-        const nextFavorites = Array.isArray(cloudData.favorites) ? cloudData.favorites : [];
-        setFavorites(new Set(nextFavorites));
-        localStorage.setItem('favorites', JSON.stringify(nextFavorites));
-
-        const nextGroups = Array.isArray(cloudData.groups) ? cloudData.groups : [];
-        setGroups(nextGroups);
-        localStorage.setItem('groups', JSON.stringify(nextGroups));
-
-        const nextRefreshMs = Number.isFinite(cloudData.refreshMs) && cloudData.refreshMs >= 5000 ? cloudData.refreshMs : 30000;
-        setRefreshMs(nextRefreshMs);
-        setTempSeconds(Math.round(nextRefreshMs / 1000));
-        localStorage.setItem('refreshMs', String(nextRefreshMs));
-
-        const nextHoldings = cloudData.holdings && typeof cloudData.holdings === 'object' ? cloudData.holdings : {};
-        setHoldings(nextHoldings);
-        localStorage.setItem('holdings', JSON.stringify(nextHoldings));
-
-        const nextPendingTrades = Array.isArray(cloudData.pendingTrades)
-          ? cloudData.pendingTrades.filter((trade) => trade && nextFundCodes.has(trade.fundCode))
-          : [];
-        setPendingTrades(nextPendingTrades);
-        localStorage.setItem('pendingTrades', JSON.stringify(nextPendingTrades));
-
-        if (nextFunds.length) {
-          const codes = Array.from(new Set(nextFunds.map((f) => f.code)));
-          if (codes.length) await refreshAll(codes);
-        }
+        const codes = dedupedFunds.map(f => f.code);
+        if (codes.length) await refreshAll(codes);
+      }
+      if (didStrip && userIdRef.current) {
+        await syncUserConfig(userIdRef.current, false);
       }
 
       const payload = collectLocalPayload();
@@ -4858,7 +4618,7 @@ export default function HomePage() {
       return;
     }
 
-    setImportChoiceModal({ open: true, data: cloudData });
+    showToast('仅支持 v2 多账本云端数据', 'error');
   };
 
   const handleCloudConflictConfirm = async () => {
@@ -4877,9 +4637,13 @@ export default function HomePage() {
 
   const exportLocalData = async () => {
     try {
-      // 导出 v2 多账本数据结构
       const userConfigStr = localStorage.getItem('userConfig');
-      let payload;
+      let payload = {
+        version: 2,
+        refreshMs: 30000,
+        portfolios: [],
+        exportedAt: nowInTz().toISOString()
+      };
 
       if (userConfigStr) {
         try {
@@ -4891,20 +4655,6 @@ export default function HomePage() {
             };
           }
         } catch {}
-      }
-
-      // 如果没有 v2 数据，降级到老格式
-      if (!payload) {
-        payload = {
-          funds: JSON.parse(localStorage.getItem('funds') || '[]'),
-          favorites: JSON.parse(localStorage.getItem('favorites') || '[]'),
-          groups: JSON.parse(localStorage.getItem('groups') || '[]'),
-          refreshMs: parseInt(localStorage.getItem('refreshMs') || '30000', 10),
-          viewMode: localStorage.getItem('viewMode') === 'list' ? 'list' : 'card',
-          holdings: JSON.parse(localStorage.getItem('holdings') || '{}'),
-          pendingTrades: JSON.parse(localStorage.getItem('pendingTrades') || '[]'),
-          exportedAt: nowInTz().toISOString()
-        };
       }
 
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -4954,18 +4704,11 @@ export default function HomePage() {
       const text = await file.text();
       const data = JSON.parse(text);
       if (data && typeof data === 'object') {
-        // 检查导入数据的版本
-        if (data.version >= 2 && Array.isArray(data.portfolios)) {
-          // v2 数据结构 - 直接合并所有账本
-          await importV2Data(data);
-        } else if (isLegacyData(data)) {
-          // 老数据结构 - 弹出选择弹窗
-          cancelImportProgress();
-          setImportChoiceModal({ open: true, data });
-          if (importFileRef.current) importFileRef.current.value = '';
-          return;
+        if (!(data.version >= 2 && Array.isArray(data.portfolios))) {
+          throw new Error('仅支持 v2 多账本导入文件');
         }
 
+        await importV2Data(data);
         await finishImportProgress();
         setSuccessModal({ open: true, message: '导入成功' });
         setSettingsOpen(false);
@@ -4974,7 +4717,7 @@ export default function HomePage() {
     } catch (err) {
       console.error('Import error:', err);
       cancelImportProgress();
-      setImportMsg('导入失败，请检查文件格式');
+      setImportMsg(err?.message || '导入失败，请检查文件格式');
       setTimeout(() => setImportMsg(''), 4000);
       if (importFileRef.current) importFileRef.current.value = '';
     }
@@ -5026,121 +4769,6 @@ export default function HomePage() {
     }
   };
 
-  // 导入老数据到当前账本
-  const importLegacyToCurrentPortfolio = async (data) => {
-    try {
-      setImportChoiceModal({ open: false, data: null });
-      startImportProgress();
-      const currentP = portfolios.find(p => p.id === currentPortfolioId);
-      if (!currentP) return;
-
-      const mergedPortfolio = mergeOldDataToPortfolio(currentP, data);
-      const resolvedMerged = resolveFundsWithInfo(mergedPortfolio.funds || []);
-      const cleanedMergedPortfolio = {
-        ...mergedPortfolio,
-        funds: resolvedMerged.cleanedFunds
-      };
-      const newPortfolios = portfolios.map(p =>
-        p.id === currentPortfolioId ? cleanedMergedPortfolio : p
-      );
-
-      const newConfig = {
-        version: 2,
-        refreshMs,
-        portfolios: newPortfolios
-      };
-
-      localStorage.setItem('userConfig', JSON.stringify(newConfig));
-      setPortfolios(newPortfolios);
-
-      // 更新当前状态
-      const cleanedFunds = sanitizeFunds(resolvedMerged.mergedFunds);
-      const fundsForStorage = prepareFundsForStorage(cleanedFunds);
-      setFunds(cleanedFunds);
-      setFavorites(new Set(mergedPortfolio.favorites || []));
-      setGroups(mergedPortfolio.groups || []);
-      setHoldings(mergedPortfolio.holdings || {});
-      setPendingTrades(mergedPortfolio.pendingTrades || []);
-
-      localStorage.setItem('funds', JSON.stringify(fundsForStorage));
-      localStorage.setItem('favorites', JSON.stringify(mergedPortfolio.favorites || []));
-      localStorage.setItem('groups', JSON.stringify(mergedPortfolio.groups || []));
-      localStorage.setItem('holdings', JSON.stringify(mergedPortfolio.holdings || {}));
-      localStorage.setItem('pendingTrades', JSON.stringify(mergedPortfolio.pendingTrades || []));
-
-      const codes = cleanedFunds.map(f => f.code);
-      if (codes.length) await refreshAll(codes);
-
-      await finishImportProgress();
-      setImportChoiceModal({ open: false, data: null });
-      setSuccessModal({ open: true, message: '导入成功' });
-      setSettingsOpen(false);
-    } catch (err) {
-      console.error('Import legacy error:', err);
-      cancelImportProgress();
-      setImportMsg('导入失败，请检查文件格式');
-      setTimeout(() => setImportMsg(''), 4000);
-    }
-  };
-
-  // 导入老数据到新账本
-  const importLegacyToNewPortfolio = async (data, portfolioName = '导入的账本') => {
-    try {
-      setImportChoiceModal({ open: false, data: null });
-      startImportProgress();
-      const v2Data = migrateToV2(data, portfolioName);
-      const newPortfolio = v2Data.portfolios[0];
-      const resolvedNew = resolveFundsWithInfo(newPortfolio.funds || []);
-      const cleanedNewPortfolio = {
-        ...newPortfolio,
-        funds: resolvedNew.cleanedFunds
-      };
-
-      const newPortfolios = [...portfolios, cleanedNewPortfolio];
-      const newConfig = {
-        version: 2,
-        refreshMs,
-        portfolios: newPortfolios
-      };
-
-      localStorage.setItem('userConfig', JSON.stringify(newConfig));
-      setPortfolios(newPortfolios);
-      setCurrentPortfolioId(cleanedNewPortfolio.id);
-      localStorage.setItem('currentPortfolioId', cleanedNewPortfolio.id);
-      activePortfolioIdRef.current = cleanedNewPortfolio.id;
-
-      // 切换到新账本
-      const cleanedFunds = sanitizeFunds(resolvedNew.mergedFunds);
-      const fundsForStorage = prepareFundsForStorage(cleanedFunds);
-      setFunds(cleanedFunds);
-      setFavorites(new Set(cleanedNewPortfolio.favorites || []));
-      setGroups(cleanedNewPortfolio.groups || []);
-      setHoldings(cleanedNewPortfolio.holdings || {});
-      setPendingTrades(cleanedNewPortfolio.pendingTrades || []);
-      setCurrentTab('all');
-
-      localStorage.setItem('funds', JSON.stringify(fundsForStorage));
-      localStorage.setItem('favorites', JSON.stringify(cleanedNewPortfolio.favorites || []));
-      localStorage.setItem('groups', JSON.stringify(cleanedNewPortfolio.groups || []));
-      localStorage.setItem('collapsedCodes', JSON.stringify(cleanedNewPortfolio.collapsedCodes || []));
-      localStorage.setItem('holdings', JSON.stringify(cleanedNewPortfolio.holdings || {}));
-      localStorage.setItem('pendingTrades', JSON.stringify(cleanedNewPortfolio.pendingTrades || []));
-
-      const codes = cleanedFunds.map(f => f.code);
-      if (codes.length) await refreshAll(codes);
-
-      await finishImportProgress();
-      setImportChoiceModal({ open: false, data: null });
-      setSuccessModal({ open: true, message: `已创建新账本"${portfolioName}"并导入数据` });
-      setSettingsOpen(false);
-    } catch (err) {
-      console.error('Import legacy error:', err);
-      cancelImportProgress();
-      setImportMsg('导入失败，请检查文件格式');
-      setTimeout(() => setImportMsg(''), 4000);
-    }
-  };
-
   useEffect(() => {
     const isAnyModalOpen =
       settingsOpen ||
@@ -5162,7 +4790,6 @@ export default function HomePage() {
       weChatOpen ||
       portfolioModalOpen ||
       pendingQueueModalOpen ||
-      importChoiceModal.open ||
       newPortfolioModal.open ||
       !!deletePortfolioConfirm;
 
@@ -5201,7 +4828,6 @@ export default function HomePage() {
     weChatOpen,
     portfolioModalOpen,
     pendingQueueModalOpen,
-    importChoiceModal.open,
     newPortfolioModal.open,
     deletePortfolioConfirm
   ]);
@@ -6778,74 +6404,6 @@ export default function HomePage() {
                 <PlusIcon width="16" height="16" />
                 <span>新建账本</span>
               </button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* 导入选择弹窗 */}
-      <AnimatePresence>
-        {importChoiceModal.open && (
-          <motion.div
-            className="modal-overlay"
-            role="dialog"
-            aria-modal="true"
-            aria-label="导入选择"
-            onClick={() => setImportChoiceModal({ open: false, data: null })}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="glass card modal"
-              onClick={(e) => e.stopPropagation()}
-              style={{ maxWidth: 400 }}
-            >
-              <div className="title" style={{ marginBottom: 20, justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 20 }}>📥</span>
-                  <span>检测到旧版数据</span>
-                </div>
-                <button
-                  className="icon-button"
-                  onClick={() => setImportChoiceModal({ open: false, data: null })}
-                  style={{ border: 'none', background: 'transparent' }}
-                >
-                  <CloseIcon width="20" height="20" />
-                </button>
-              </div>
-
-              <p className="muted" style={{ marginBottom: 20, fontSize: 14, lineHeight: 1.6 }}>
-                检测到导入的数据为旧版格式，请选择导入方式：
-              </p>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <button
-                  className="button"
-                  onClick={() => importLegacyToCurrentPortfolio(importChoiceModal.data)}
-                  style={{ width: '100%' }}
-                >
-                  导入到当前账本「{currentPortfolio?.name || '默认账本'}」
-                </button>
-                <button
-                  className="button secondary"
-                  onClick={() => {
-                    setNewPortfolioName('导入的账本');
-                    setNewPortfolioModal({
-                      open: true,
-                      callback: (name) => {
-                        importLegacyToNewPortfolio(importChoiceModal.data, name);
-                      }
-                    });
-                  }}
-                  style={{ width: '100%', background: 'rgba(255,255,255,0.1)' }}
-                >
-                  新建账本并导入
-                </button>
-              </div>
             </motion.div>
           </motion.div>
         )}
